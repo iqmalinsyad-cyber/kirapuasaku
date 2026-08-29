@@ -87,18 +87,25 @@ export async function apiRequest<T = any>(
 // Authentication API calls
 export const authApi = {
   async register(username: string, email: string, password: string, avatar?: string, name?: string) {
-    return apiRequest<{
+    const res = await apiRequest<{
       success: boolean;
       message: string;
-      requiresEmailVerification: boolean;
       email: string;
       username: string;
-      verificationToken: string;
+      token?: string;
+      expiresAt?: number;
       user: User;
     }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ username, email, password, avatar, name }),
     });
+
+    if (res.data?.token && res.data?.user) {
+      setStoredToken(res.data.token);
+      setStoredUser(res.data.user);
+    }
+
+    return res;
   },
 
   async verifyEmail(token: string, email?: string) {

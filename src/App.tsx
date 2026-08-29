@@ -140,6 +140,36 @@ export default function App() {
     checkAuth();
   }, [loadUserDataFromServer]);
 
+  // Real-Time Multi-Device Synchronization (Window focus & Periodic Polling)
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // 1. Sync immediately when user switches tabs or returns to the app
+    const handleFocusSync = () => {
+      loadUserDataFromServer();
+    };
+
+    const handleVisibilitySync = () => {
+      if (document.visibilityState === 'visible') {
+        loadUserDataFromServer();
+      }
+    };
+
+    window.addEventListener('focus', handleFocusSync);
+    document.addEventListener('visibilitychange', handleVisibilitySync);
+
+    // 2. Continuous real-time synchronization every 20 seconds
+    const interval = setInterval(() => {
+      loadUserDataFromServer();
+    }, 20000);
+
+    return () => {
+      window.removeEventListener('focus', handleFocusSync);
+      document.removeEventListener('visibilitychange', handleVisibilitySync);
+      clearInterval(interval);
+    };
+  }, [currentUser, loadUserDataFromServer]);
+
   // Derived dynamic statistics
   const stats = useMemo(() => {
     return calculateQadaStats(qada, records);

@@ -50,26 +50,28 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           id="brand-header-button"
           onClick={() => setCurrentTab('dashboard')}
-          className="flex items-center gap-2 sm:gap-3 text-left focus:outline-none group cursor-pointer min-w-0 shrink"
+          className="flex items-center gap-2 sm:gap-3 text-left focus:outline-none group cursor-pointer shrink-0"
         >
-          <img
-            src="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn"
-            alt="KiraPuasaKu"
-            className="h-8 w-8 sm:h-9 sm:w-9 object-contain shrink-0 transition-transform group-hover:scale-105"
-            referrerPolicy="no-referrer"
-          />
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-base sm:text-xl font-extrabold font-logo truncate select-none">
+          <div className="relative flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-xl overflow-hidden bg-emerald-950/10 dark:bg-emerald-950/40 p-0.5 border border-emerald-700/20 shrink-0 shadow-2xs">
+            <img
+              src="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn"
+              alt="KiraPuasaKu"
+              className="h-full w-full object-contain transition-transform group-hover:scale-105"
+              referrerPolicy="no-referrer"
+            />
+          </div>
+          <div className="shrink-0">
+            <div className="flex items-center gap-1.5 whitespace-nowrap">
+              <span className="text-base sm:text-xl font-black font-logo tracking-tight select-none flex items-center leading-none">
                 <span className="brand-title-kira">Kira</span>
                 <span className="brand-title-puasa">Puasa</span>
                 <span className="brand-title-ku">Ku</span>
               </span>
-              <span className="hidden xs:inline-flex items-center rounded-md bg-stone-200/70 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-stone-700 dark:bg-stone-800 dark:text-stone-300 border border-stone-300/80 dark:border-stone-700 font-mono shrink-0">
+              <span className="hidden xs:inline-flex items-center rounded-md bg-stone-200/80 px-1.5 py-0.5 text-[9px] sm:text-[10px] font-bold text-stone-700 dark:bg-stone-800 dark:text-stone-300 border border-stone-300/80 dark:border-stone-700 font-mono shrink-0">
                 1447H
               </span>
             </div>
-            <p className="text-[11px] text-stone-500 dark:text-stone-400 hidden sm:block font-normal truncate">
+            <p className="text-[10.5px] sm:text-[11px] text-stone-500 dark:text-stone-400 font-medium whitespace-nowrap hidden sm:block mt-0.5">
               {t.tagline}
             </p>
           </div>

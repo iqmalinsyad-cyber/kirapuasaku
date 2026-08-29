@@ -591,7 +591,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         {/* 3. INTEGRASI DATABASE UTAMA GOOGLE SHEETS (KHUSUS ADMIN SAHAJA UNTUK PRIVASI) */}
-        {currentUser?.role === 'admin' && (
+        {Boolean(currentUser && currentUser.role === 'admin') && (
           <div className="md:col-span-2 rounded-2xl border-2 border-emerald-700/40 bg-emerald-950/10 p-5 shadow-2xs dark:border-emerald-600/40 dark:bg-emerald-950/20">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/20 pb-3.5">
               <div>
@@ -1003,8 +1003,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       )}
 
-      {/* MODAL: GOOGLE APPS SCRIPT CODE VIEWER */}
-      {showAppsScriptModal && (
+      {/* MODAL: GOOGLE APPS SCRIPT CODE VIEWER (KHUSUS ADMIN) */}
+      {Boolean(currentUser && currentUser.role === 'admin') && showAppsScriptModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-4 backdrop-blur-xs">
           <div className="w-full max-w-2xl rounded-2xl border border-stone-200 bg-white p-5 sm:p-6 shadow-2xl dark:border-stone-800 dark:bg-stone-900 flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between border-b border-stone-100 pb-3 dark:border-stone-800">

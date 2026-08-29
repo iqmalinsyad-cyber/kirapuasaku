@@ -330,7 +330,7 @@ export function verifyToken(req: AuthenticatedRequest, res: Response, next: Next
     db.sessions = db.sessions.filter((s) => s.token !== token);
     saveDatabase();
     return res.status(401).json({
-      error: 'Sesi anda telah tamat tempoh (had 2 jam). Sila log masuk semula.',
+      error: 'Sesi anda telah tamat tempoh. Sila log masuk semula.',
       code: 'TOKEN_EXPIRED'
     });
   }
@@ -432,7 +432,7 @@ async function startServer() {
       username: cleanUsername,
       name: displayName,
       email: cleanEmail,
-      email_verified: false, // Must be verified via link before login!
+      email_verified: true, // Active and verified by default for multi-device ease
       verification_token: verificationToken,
       salt,
       passwordHash,
@@ -464,15 +464,31 @@ async function startServer() {
       }
     };
 
+    // Generate Long-lived Session Token (365 days for seamless multi-device persistence)
+    const token = generateToken();
+    const now = Date.now();
+    const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
+    const expiresAt = now + SESSION_DURATION_MS;
+
+    const session: SessionRecord = {
+      token,
+      userId: newUser.id,
+      createdAt: now,
+      expiresAt,
+    };
+
+    db.sessions.push(session);
+    newUser.last_login = new Date().toISOString();
+
     saveDatabase();
 
     return res.status(201).json({
       success: true,
-      message: `Pendaftaran akaun berjaya! Satu emel pengesahan telah dihantar ke ${cleanEmail}. Sila sahkan emel anda sebelum log masuk.`,
-      requiresEmailVerification: true,
+      message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
+      token,
+      expiresAt,
       email: cleanEmail,
       username: cleanUsername,
-      verificationToken: newUser.verification_token,
       user: {
         id: newUser.id,
         username: newUser.username,
@@ -617,17 +633,6 @@ async function startServer() {
       });
     }
 
-    // Security Check: Email Verification
-    if (user.role !== 'admin' && !user.email_verified) {
-      return res.status(403).json({
-        error: `Sila sahkan alamat emel anda (${user.email}) melalui pautan pengesahan sebelum log masuk.`,
-        code: 'EMAIL_NOT_VERIFIED',
-        email: user.email,
-        username: user.username,
-        verificationToken: user.verification_token
-      });
-    }
-
     // Check User Status
     if (user.status === 'rejected') {
       return res.status(403).json({
@@ -639,11 +644,11 @@ async function startServer() {
     // Login Successful: Reset failed attempts
     resetFailedLogin(rateLimitKey);
 
-    // Generate 2-Hour Session Token
+    // Generate Long-lived Session Token (365 days for seamless multi-device persistence)
     const token = generateToken();
     const now = Date.now();
-    const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
-    const expiresAt = now + TWO_HOURS_MS;
+    const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
+    const expiresAt = now + SESSION_DURATION_MS;
 
     const session: SessionRecord = {
       token,

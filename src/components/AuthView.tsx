@@ -170,19 +170,32 @@ export const AuthView: React.FC<AuthViewProps> = ({
         setErrorMessage(res.error);
         onShowToast(res.error, 'error');
       } else if (res.data) {
-        setPendingVerification({
-          email: res.data.email,
-          username: res.data.username,
-          token: res.data.verificationToken,
-        });
-        setLoginIdentifier(cleanUser);
-        setLoginPassword(regPassword);
         onShowToast(
           language === 'ms' 
-            ? 'Pendaftaran berjaya! Sila sahkan emel anda.' 
-            : 'Registered! Please verify your email.', 
-          'info'
+            ? 'Alhamdulillah! Pendaftaran berjaya. Selamat datang ke KiraPuasaKu.' 
+            : 'Registration successful! Welcome to KiraPuasaKu.', 
+          'success'
         );
+
+        if (res.data.user && res.data.token) {
+          onLoginSuccess(res.data.user, res.data.token);
+          return;
+        }
+
+        // Fallback login
+        try {
+          const loginRes = await authApi.login(cleanUser, regPassword);
+          if (loginRes.data?.user && loginRes.data?.token) {
+            onLoginSuccess(loginRes.data.user, loginRes.data.token);
+            return;
+          }
+        } catch (loginErr) {
+          console.warn('Auto login fallback:', loginErr);
+        }
+
+        setActiveTab('login');
+        setLoginIdentifier(cleanUser);
+        setLoginPassword(regPassword);
       }
     } catch (err: any) {
       setErrorMessage(
