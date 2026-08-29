@@ -429,7 +429,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div className="flex-1 space-y-1.5">
                   <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                    Pilih avatar muslim atau muat naik foto peribadi:
+                    {t.avatarHelpText || 'Pilih avatar atau muat naik foto:'}
                   </p>
                   
                   <div className="flex items-center gap-2">
@@ -590,79 +590,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </form>
         </div>
 
-        {/* 3. INTEGRASI DATABASE UTAMA GOOGLE SHEETS */}
-        <div className="md:col-span-2 rounded-2xl border-2 border-emerald-700/40 bg-emerald-950/10 p-5 shadow-2xs dark:border-emerald-600/40 dark:bg-emerald-950/20">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/20 pb-3.5">
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
-                  <Table className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                  <span>Google Sheets Sebagai Database Utama</span>
-                </h2>
-                <span className="rounded-md bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-bold">
-                  🟢 Auto-Sync Aktif
-                </span>
+        {/* 3. INTEGRASI DATABASE UTAMA GOOGLE SHEETS (KHUSUS ADMIN SAHAJA UNTUK PRIVASI) */}
+        {currentUser?.role === 'admin' && (
+          <div className="md:col-span-2 rounded-2xl border-2 border-emerald-700/40 bg-emerald-950/10 p-5 shadow-2xs dark:border-emerald-600/40 dark:bg-emerald-950/20">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/20 pb-3.5">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
+                    <Table className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                    <span>Google Sheets Sebagai Database Utama</span>
+                  </h2>
+                  <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[10px] font-bold text-amber-300 dark:bg-stone-800 border border-stone-700">
+                    Khusus Pentadbir (Admin)
+                  </span>
+                  <span className="rounded-md bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-bold">
+                    🟢 Auto-Sync Aktif
+                  </span>
+                </div>
+                <p className="text-xs text-stone-600 dark:text-stone-400 mt-1">
+                  Segala data sasaran qada, rekod puasa harian, dan profil pengguna akan disimpan dan diselaraskan secara langsung ke Google Sheet anda sebagai pengkalan data utama.
+                </p>
               </div>
-              <p className="text-xs text-stone-600 dark:text-stone-400 mt-1">
-                Segala data sasaran qada, rekod puasa harian, dan profil pengguna akan disimpan dan diselaraskan secara langsung ke Google Sheet anda sebagai pengkalan data utama.
-              </p>
+
+              <button
+                type="button"
+                onClick={() => setShowAppsScriptModal(true)}
+                className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900 dark:text-emerald-200 transition cursor-pointer shrink-0"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>{t.btnViewAppsScriptCode}</span>
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => setShowAppsScriptModal(true)}
-              className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-3 py-1.5 text-xs font-bold text-emerald-800 hover:bg-emerald-50 dark:border-emerald-700 dark:bg-emerald-900 dark:text-emerald-200 transition cursor-pointer shrink-0"
-            >
-              <Copy className="h-3.5 w-3.5" />
-              <span>{t.btnViewAppsScriptCode}</span>
-            </button>
+            <div className="mt-4 space-y-3.5">
+              <div>
+                <label className="block text-xs font-semibold text-stone-800 dark:text-stone-200 mb-1">
+                  {t.labelGoogleSheetsUrl}
+                </label>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="url"
+                    value={sheetWebhookUrl}
+                    onChange={(e) => setSheetWebhookUrl(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="flex-1 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveGoogleSheetUrl}
+                    className="rounded-xl bg-stone-900 px-4 py-2 text-xs font-bold text-white hover:bg-stone-800 dark:bg-stone-800 dark:hover:bg-stone-700 transition cursor-pointer shrink-0"
+                  >
+                    {t.btnSaveSheetUrl}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                <div className="text-[11px] text-stone-500 dark:text-stone-400">
+                  <span>{t.lastSyncedLabel}: </span>
+                  <strong className="text-stone-700 dark:text-stone-300 font-mono">
+                    {settings.lastGoogleSheetSync || 'Auto-sync bersedia (Setiap tindakan direkodkan)'}
+                  </strong>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSyncToGoogleSheet}
+                    disabled={isSyncingSheet}
+                    className="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold shadow-2xs transition active:scale-[0.98] cursor-pointer"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{isSyncingSheet ? 'Menyelaraskan ke Google Sheet...' : 'Kemaskini Google Sheet Sekarang'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-
-          <div className="mt-4 space-y-3.5">
-            <div>
-              <label className="block text-xs font-semibold text-stone-800 dark:text-stone-200 mb-1">
-                {t.labelGoogleSheetsUrl}
-              </label>
-              <div className="flex flex-col sm:flex-row gap-2">
-                <input
-                  type="url"
-                  value={sheetWebhookUrl}
-                  onChange={(e) => setSheetWebhookUrl(e.target.value)}
-                  placeholder="https://script.google.com/macros/s/.../exec"
-                  className="flex-1 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveGoogleSheetUrl}
-                  className="rounded-xl bg-stone-900 px-4 py-2 text-xs font-bold text-white hover:bg-stone-800 dark:bg-stone-800 dark:hover:bg-stone-700 transition cursor-pointer shrink-0"
-                >
-                  {t.btnSaveSheetUrl}
-                </button>
-              </div>
-            </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-              <div className="text-[11px] text-stone-500 dark:text-stone-400">
-                <span>{t.lastSyncedLabel}: </span>
-                <strong className="text-stone-700 dark:text-stone-300 font-mono">
-                  {settings.lastGoogleSheetSync || 'Auto-sync bersedia (Setiap tindakan direkodkan)'}
-                </strong>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleSyncToGoogleSheet}
-                  disabled={isSyncingSheet}
-                  className="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold shadow-2xs transition active:scale-[0.98] cursor-pointer"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  <span>{isSyncingSheet ? 'Menyelaraskan ke Google Sheet...' : 'Kemaskini Google Sheet Sekarang'}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+        )}
 
         {/* 4. Sasaran Puasa Ganti */}
         <div className="rounded-2xl border border-stone-200/80 bg-white p-5 shadow-2xs dark:border-stone-800 dark:bg-stone-900">

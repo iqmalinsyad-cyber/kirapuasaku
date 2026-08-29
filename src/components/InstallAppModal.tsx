@@ -71,8 +71,10 @@ export const InstallAppModal: React.FC<InstallAppModalProps> = ({
         {canNativeInstall && !isStandalone && onNativeInstall && (
           <div className="mt-4 p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/50 dark:border-emerald-800 flex items-center justify-between gap-3">
             <div className="text-xs text-emerald-900 dark:text-emerald-200">
-              <p className="font-bold">Pasang Satu Klik Sedia!</p>
-              <p className="text-[11px] text-emerald-700 dark:text-emerald-300">Pelayar anda menyokong pemasangan terus.</p>
+              <p className="font-bold">{language === 'ms' ? 'Pasang Satu Klik Sedia!' : 'One-Click Install Ready!'}</p>
+              <p className="text-[11px] text-emerald-700 dark:text-emerald-300">
+                {language === 'ms' ? 'Pelayar anda menyokong pemasangan terus.' : 'Your browser supports direct app installation.'}
+              </p>
             </div>
             <button
               type="button"

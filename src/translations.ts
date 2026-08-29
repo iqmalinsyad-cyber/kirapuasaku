@@ -214,6 +214,7 @@ export const translations = {
     // User Profile & Settings
     sectionUserAccount: 'Akaun & Profil Pengguna',
     labelProfilePicture: 'Gambar Profil / Avatar',
+    avatarHelpText: 'Pilih avatar atau muat naik foto:',
     btnUploadPhoto: 'Muat Naik Gambar',
     btnChoosePreset: 'Pilih Avatar',
     labelCurrentPassword: 'Kata Laluan Semasa',
@@ -505,6 +506,7 @@ export const translations = {
     // User Profile & Settings
     sectionUserAccount: 'User Account & Profile',
     labelProfilePicture: 'Profile Picture / Avatar',
+    avatarHelpText: 'Choose an avatar or upload a photo:',
     btnUploadPhoto: 'Upload Photo',
     btnChoosePreset: 'Choose Avatar',
     labelCurrentPassword: 'Current Password',
