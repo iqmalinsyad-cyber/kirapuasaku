@@ -1,0 +1,26 @@
+{
+  "name": "KiraPuasaKu - Rekod & Kira Puasa Ganti",
+  "short_name": "KiraPuasaKu",
+  "description": "Aplikasi mudah dan pantas untuk merekod, mengira baki, dan menjejaki puasa ganti (qada).",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#064e3b",
+  "theme_color": "#064e3b",
+  "orientation": "portrait-primary",
+  "lang": "ms",
+  "icons": [
+    {
+      "src": "https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "KiraPuasaKu",
+  "description": "Aplikasi mudah dan pantas untuk merekod, mengira baki, dan menjejaki puasa ganti (qada) dengan paparan visual yang tenang dan mesra pengguna.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

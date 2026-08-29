@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ms">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>KiraPuasaKu</title>
+    <meta name="description" content="Aplikasi mudah dan pantas untuk merekod, mengira baki, dan menjejaki puasa ganti (qada) dengan paparan visual yang tenang dan mesra pengguna." />
+    <meta property="og:title" content="KiraPuasaKu" />
+    <meta property="og:description" content="Aplikasi mudah dan pantas untuk merekod, mengira baki, dan menjejaki puasa ganti (qada) dengan paparan visual yang tenang dan mesra pengguna." />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#064e3b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="KiraPuasaKu" />
+    <meta name="application-name" content="KiraPuasaKu" />
+    <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn" />
+    <link rel="shortcut icon" href="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn" />
+    <link rel="apple-touch-icon" sizes="192x192" href="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-stone-50 text-stone-900 antialiased selection:bg-emerald-200 selection:text-emerald-900">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
+  </body>
+</html>
+
