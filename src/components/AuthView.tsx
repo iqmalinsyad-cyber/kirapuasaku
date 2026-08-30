@@ -479,7 +479,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       <a
-                        href={`https://wa.me/60123456789?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
+                        href={`https://wa.me/601159820737?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-xs"
@@ -488,7 +488,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         <span>WhatsApp Admin</span>
                       </a>
                       <a
-                        href={`mailto:admin@kirapuasaku.app?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
+                        href={`mailto:iqmalinsyad@gmail.com?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-xs"
                       >
                         <Mail className="h-3.5 w-3.5" />
