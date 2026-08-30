@@ -521,6 +521,40 @@ export const adminApi = {
       body: JSON.stringify({ testEmail }),
     });
   },
+
+  async getTelegramConfig() {
+    return apiRequest<{
+      configured: boolean;
+      enabled: boolean;
+      adminChatId: string;
+      maskedToken: string;
+      hasEnvFallback: boolean;
+    }>('/api/admin/telegram-config');
+  },
+
+  async updateTelegramConfig(botToken: string, adminChatId: string, enabled: boolean) {
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      configured: boolean;
+      enabled: boolean;
+    }>('/api/admin/telegram-config', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, adminChatId, enabled }),
+    });
+  },
+
+  async testTelegram(botToken?: string, adminChatId?: string) {
+    return apiRequest<{
+      success: boolean;
+      botName?: string;
+      message?: string;
+      error?: string;
+    }>('/api/admin/telegram-test', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, adminChatId }),
+    });
+  },
 };
 
 // Qada Data API calls with Full Firestore Cloud Sync
@@ -540,33 +574,21 @@ export const qadaApi = {
           firestoreService.getUserSettings(currentUser.id),
         ]);
 
-        const finalQada = cloudQada || localQada;
-
-        if (finalQada) {
+        let finalQada: QadaRecord | null = null;
+        if (cloudQada && Number(cloudQada.total_required) > 0) {
+          finalQada = cloudQada;
           saveQadaRecord(finalQada);
-          // If locally exists but not yet in cloud, sync to Firestore
-          if (!cloudQada && localQada) {
-            firestoreService.saveQadaTarget(currentUser.id, localQada).catch((e) => console.warn(e));
-          }
+        } else {
+          // If cloud has no target, clear local qada target so Onboarding displays
+          localStorage.removeItem('qada_record');
         }
 
-        const finalRecords = (Array.isArray(cloudRecords) && cloudRecords.length > 0)
-          ? cloudRecords
-          : (localRecords.length > 0 ? localRecords : (Array.isArray(cloudRecords) ? cloudRecords : []));
-
-        if (finalRecords.length > 0) {
-          saveDailyRecords(finalRecords);
-          if ((!cloudRecords || cloudRecords.length === 0) && localRecords.length > 0) {
-            firestoreService.saveDailyRecords(currentUser.id, localRecords).catch((e) => console.warn(e));
-          }
-        }
+        const finalRecords: DailyRecord[] = Array.isArray(cloudRecords) ? cloudRecords : [];
+        saveDailyRecords(finalRecords);
 
         const finalSettings = cloudSettings || localSettings;
         if (finalSettings) {
           saveSettings(finalSettings);
-          if (!cloudSettings && localSettings) {
-            firestoreService.saveUserSettings(currentUser.id, localSettings).catch((e) => console.warn(e));
-          }
         }
 
         return {
@@ -640,3 +662,40 @@ export const qadaApi = {
     });
   },
 };
+
+// Telegram Bot Admin API
+export const telegramApi = {
+  async getConfig() {
+    return apiRequest<{
+      configured: boolean;
+      enabled: boolean;
+      adminChatId: string;
+      maskedToken: string;
+      hasEnvFallback: boolean;
+    }>('/api/admin/telegram-config');
+  },
+
+  async saveConfig(botToken?: string, adminChatId?: string, enabled: boolean = true) {
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      configured: boolean;
+      enabled: boolean;
+    }>('/api/admin/telegram-config', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, adminChatId, enabled }),
+    });
+  },
+
+  async testNotification(botToken?: string, adminChatId?: string) {
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      botUsername?: string;
+    }>('/api/admin/telegram-test', {
+      method: 'POST',
+      body: JSON.stringify({ botToken, adminChatId }),
+    });
+  },
+};
+

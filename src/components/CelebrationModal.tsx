@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import confetti from 'canvas-confetti';
-import { X, ArrowRight } from 'lucide-react';
+import { X, ArrowRight, Target } from 'lucide-react';
 import { Language } from '../types';
 import { getTranslation } from '../translations';
 
@@ -9,6 +9,7 @@ interface CelebrationModalProps {
   onClose: () => void;
   language: Language;
   totalDaysCompleted: number;
+  onOpenSetNewTarget?: () => void;
 }
 
 export const CelebrationModal: React.FC<CelebrationModalProps> = ({
@@ -16,6 +17,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({
   onClose,
   language,
   totalDaysCompleted,
+  onOpenSetNewTarget,
 }) => {
   const t = getTranslation(language);
 
@@ -71,7 +73,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({
 
         {/* Title */}
         <div className="inline-block rounded-md bg-amber-400/20 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300 border border-amber-300/30 mb-2">
-          100% Selesai
+          100% {language === 'ms' ? 'Selesai' : 'Completed'}
         </div>
 
         <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white font-sans">
@@ -96,14 +98,30 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({
           </div>
         </div>
 
-        <button
-          id="celebration-modal-continue-btn"
-          onClick={onClose}
-          className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 py-2.5 text-xs font-bold text-white shadow-2xs transition cursor-pointer"
-        >
-          <span>{language === 'ms' ? 'Alhamdulillah, Teruskan' : 'Continue'}</span>
-          <ArrowRight className="h-3.5 w-3.5" />
-        </button>
+        <div className="space-y-2">
+          {onOpenSetNewTarget && (
+            <button
+              id="celebration-modal-new-target-btn"
+              onClick={() => {
+                onClose();
+                onOpenSetNewTarget();
+              }}
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 py-2.5 text-xs font-bold text-stone-950 shadow-md transition cursor-pointer"
+            >
+              <Target className="h-4 w-4" />
+              <span>{t.btnSetNewTarget}</span>
+            </button>
+          )}
+
+          <button
+            id="celebration-modal-continue-btn"
+            onClick={onClose}
+            className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 py-2.5 text-xs font-bold text-white shadow-2xs transition cursor-pointer"
+          >
+            <span>{language === 'ms' ? 'Alhamdulillah, Teruskan' : 'Continue'}</span>
+            <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );

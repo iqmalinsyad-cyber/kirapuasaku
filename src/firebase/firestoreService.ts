@@ -45,6 +45,29 @@ export async function hashPasswordClient(password: string): Promise<string> {
   }
 }
 
+/**
+ * Recursively cleans an object for Firestore by removing any undefined keys or converting them safely.
+ * Firestore setDoc/updateDoc strictly rejects `undefined` values.
+ */
+export function cleanFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return null as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => cleanFirestoreData(item)) as unknown as T;
+  }
+  if (typeof obj === 'object' && obj.constructor === Object) {
+    const clean: Record<string, any> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, any>)) {
+      if (value !== undefined) {
+        clean[key] = cleanFirestoreData(value);
+      }
+    }
+    return clean as T;
+  }
+  return obj;
+}
+
 // Cache flag so ensureAdminExists only runs once per app session
 let hasCheckedAdmin = false;
 
@@ -72,7 +95,7 @@ export const firestoreService = {
           created_at: new Date().toISOString(),
           last_login: new Date().toISOString(),
         };
-        await setDoc(adminDocRef, adminData);
+        await setDoc(adminDocRef, cleanFirestoreData(adminData));
       }
     } catch (err) {
       console.warn('Firebase ensureAdminExists notice:', err);
@@ -125,20 +148,30 @@ export const firestoreService = {
   // Save new user registration
   async registerUser(userData: User, rawPassword: string): Promise<void> {
     const hashedPassword = await hashPasswordClient(rawPassword);
-    const docData: FirestoreUserData = {
-      ...userData,
+    const docData = cleanFirestoreData<FirestoreUserData>({
+      id: userData.id,
+      username: userData.username,
+      name: userData.name || userData.username,
+      email: userData.email,
+      email_verified: !!userData.email_verified,
+      role: userData.role || 'user',
+      status: userData.status || 'pending',
+      avatar: userData.avatar || '',
       passwordHash: hashedPassword,
-    };
-    await setDoc(doc(db, USERS_COLLECTION, userData.id), docData);
+      created_at: userData.created_at || new Date().toISOString(),
+      last_login: userData.last_login || new Date().toISOString(),
+    });
+    await setDoc(doc(db, USERS_COLLECTION, userData.id), docData, { merge: true });
   },
 
   // Update profile
   async updateUserProfile(userId: string, updates: Partial<User>): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, {
+    const cleanUpdates = cleanFirestoreData({
       ...updates,
       updated_at: new Date().toISOString(),
     });
+    await updateDoc(userRef, cleanUpdates);
   },
 
   // Update password in Firestore (updates both admin_root and custom user doc if admin)
@@ -151,15 +184,15 @@ export const firestoreService = {
     for (const id of targetIds) {
       try {
         const userRef = doc(db, USERS_COLLECTION, id);
-        await updateDoc(userRef, {
+        await updateDoc(userRef, cleanFirestoreData({
           passwordHash: hashedPassword,
           updated_at: new Date().toISOString(),
-        });
+        }));
       } catch {
         // If doc didn't exist with that specific ID, try setDoc if it was admin_root
         if (id === 'admin_root') {
           try {
-            await setDoc(doc(db, USERS_COLLECTION, 'admin_root'), {
+            await setDoc(doc(db, USERS_COLLECTION, 'admin_root'), cleanFirestoreData({
               id: 'admin_root',
               username: 'admin',
               name: 'Pentadbir KiraPuasaKu',
@@ -169,7 +202,7 @@ export const firestoreService = {
               status: 'approved',
               passwordHash: hashedPassword,
               updated_at: new Date().toISOString(),
-            }, { merge: true });
+            }), { merge: true });
           } catch {}
         }
       }
@@ -180,9 +213,9 @@ export const firestoreService = {
   async updateLastLogin(userId: string): Promise<void> {
     try {
       const userRef = doc(db, USERS_COLLECTION, userId);
-      await updateDoc(userRef, {
+      await updateDoc(userRef, cleanFirestoreData({
         last_login: new Date().toISOString(),
-      });
+      }));
     } catch {
       // Non-blocking
     }
@@ -270,13 +303,13 @@ export const firestoreService = {
   // Update user status by admin
   async setUserStatus(userId: string, status: 'pending' | 'approved' | 'rejected'): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, { status });
+    await updateDoc(userRef, cleanFirestoreData({ status }));
   },
 
   // Verify email by admin
   async setUserEmailVerified(userId: string, email_verified: boolean): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, { email_verified, status: email_verified ? 'approved' : 'pending' });
+    await updateDoc(userRef, cleanFirestoreData({ email_verified, status: email_verified ? 'approved' : 'pending' }));
   },
 
   // Verify email via link token/email
@@ -285,11 +318,11 @@ export const firestoreService = {
       const user = await this.findUserByIdentifier(identifier);
       if (user) {
         const userRef = doc(db, USERS_COLLECTION, user.id);
-        await updateDoc(userRef, {
+        await updateDoc(userRef, cleanFirestoreData({
           email_verified: true,
           status: 'approved',
           updated_at: new Date().toISOString(),
-        });
+        }));
         return true;
       }
       return false;
@@ -316,18 +349,9 @@ export const firestoreService = {
     try {
       const snap = await getDoc(doc(db, QADA_COLLECTION, userId));
       if (snap.exists()) {
-        return snap.data() as QadaRecord;
-      }
-      // If admin, check possible admin IDs
-      if (userId.includes('admin') || userId === 'admin_root' || userId === 'user_admin_001' || userId === 'admin') {
-        const fallbacks = ['admin_root', 'user_admin_001', 'admin'];
-        for (const fb of fallbacks) {
-          if (fb !== userId) {
-            const fbSnap = await getDoc(doc(db, QADA_COLLECTION, fb)).catch(() => null);
-            if (fbSnap && fbSnap.exists()) {
-              return fbSnap.data() as QadaRecord;
-            }
-          }
+        const data = snap.data();
+        if (data && Number(data.total_required) > 0) {
+          return data as QadaRecord;
         }
       }
       return null;
@@ -339,11 +363,18 @@ export const firestoreService = {
 
   async saveQadaTarget(userId: string, qada: QadaRecord): Promise<void> {
     try {
-      await setDoc(doc(db, QADA_COLLECTION, userId), {
-        ...qada,
+      const payload = cleanFirestoreData({
+        id: qada.id || `qada_${userId}`,
         user_id: userId,
+        total_required: Number(qada.total_required) || 0,
+        total_completed: Number(qada.total_completed) || 0,
+        remaining: Number(qada.remaining) || 0,
+        year: qada.year || new Date().getFullYear().toString(),
+        notes: qada.notes ?? '',
+        created_at: qada.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
+      await setDoc(doc(db, QADA_COLLECTION, userId), payload, { merge: true });
     } catch (err) {
       console.error('Firestore saveQadaTarget err:', err);
     }
@@ -366,10 +397,19 @@ export const firestoreService = {
 
   async saveDailyRecords(userId: string, records: DailyRecord[]): Promise<void> {
     try {
-      await setDoc(doc(db, RECORDS_COLLECTION, userId), {
-        items: records || [],
+      const cleanRecords = (records || []).map((r) => cleanFirestoreData({
+        id: r.id,
+        qada_record_id: r.qada_record_id || `qada_${userId}`,
+        date: r.date,
+        days: Number(r.days) || 1,
+        notes: r.notes ?? '',
+        created_at: r.created_at || new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      });
+      }));
+      await setDoc(doc(db, RECORDS_COLLECTION, userId), {
+        items: cleanRecords,
+        updated_at: new Date().toISOString(),
+      }, { merge: true });
     } catch (err) {
       console.error('Firestore saveDailyRecords err:', err);
     }
@@ -379,6 +419,13 @@ export const firestoreService = {
   async resetUserData(userId: string): Promise<void> {
     try {
       await deleteDoc(doc(db, QADA_COLLECTION, userId));
+      // Also clean up any legacy keys
+      const legacyKeys = ['admin_root', 'user_admin_001', 'admin', 'usr_admin_root', 'qada_admin'];
+      for (const k of legacyKeys) {
+        if (k !== userId) {
+          await deleteDoc(doc(db, QADA_COLLECTION, k)).catch(() => {});
+        }
+      }
       await setDoc(doc(db, RECORDS_COLLECTION, userId), {
         items: [],
         updated_at: new Date().toISOString(),
@@ -404,10 +451,12 @@ export const firestoreService = {
 
   async saveUserSettings(userId: string, settings: UserSettings): Promise<void> {
     try {
-      await setDoc(doc(db, SETTINGS_COLLECTION, userId), {
+      const payload = cleanFirestoreData({
         ...settings,
+        user_id: userId,
         updated_at: new Date().toISOString(),
       });
+      await setDoc(doc(db, SETTINGS_COLLECTION, userId), payload, { merge: true });
     } catch (err) {
       console.error('Firestore saveUserSettings err:', err);
     }

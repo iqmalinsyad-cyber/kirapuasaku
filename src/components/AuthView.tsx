@@ -479,7 +479,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       <a
-                        href={`https://wa.me/601159820737?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
+                        href={`https://wa.me/60123456789?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-xs"
@@ -488,7 +488,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         <span>WhatsApp Admin</span>
                       </a>
                       <a
-                        href={`mailto:iqmalinsyad@gmail.com?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
+                        href={`mailto:admin@kirapuasaku.app?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-xs"
                       >
                         <Mail className="h-3.5 w-3.5" />
@@ -554,7 +554,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         autoComplete="username"
                         autoCapitalize="none"
                         autoCorrect="off"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/70 pl-10 pr-4 py-3 text-xs sm:text-sm font-medium text-stone-900 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-900 transition"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
                       />
                     </div>
                   </div>
@@ -578,7 +578,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         onChange={(e) => setLoginPassword(e.target.value)}
                         placeholder={t.placeholderPassword}
                         autoComplete="current-password"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/70 pl-10 pr-11 py-3 text-xs sm:text-sm font-medium text-stone-900 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-900 transition"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
                       />
                       <button
                         type="button"
@@ -651,7 +651,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         autoComplete="username"
                         autoCapitalize="none"
                         autoCorrect="off"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/70 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-900 transition"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
                       />
                     </div>
                   </div>
@@ -676,7 +676,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         autoCapitalize="none"
                         autoCorrect="off"
                         inputMode="email"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/70 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-900 transition"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
                       />
                     </div>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400">
@@ -702,7 +702,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         onChange={(e) => setRegPassword(e.target.value)}
                         placeholder={t.placeholderPassword}
                         autoComplete="new-password"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/70 pl-10 pr-11 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-900 transition"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
                       />
                       <button
                         type="button"

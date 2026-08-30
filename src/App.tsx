@@ -24,6 +24,7 @@ import { CelebrationModal } from './components/CelebrationModal';
 import { AuthView } from './components/AuthView';
 import { AdminUsersModal } from './components/AdminUsersModal';
 import { ShareReportModal } from './components/ShareReportModal';
+import { SetNewTargetModal } from './components/SetNewTargetModal';
 import { Footer } from './components/Footer';
 import { ToastContainer, ToastMessage } from './components/Toast';
 
@@ -44,6 +45,7 @@ export default function App() {
   const [editingRecord, setEditingRecord] = useState<DailyRecord | null>(null);
   const [addModalInitialDate, setAddModalInitialDate] = useState<string | undefined>(undefined);
   const [isCelebrationOpen, setIsCelebrationOpen] = useState<boolean>(false);
+  const [isSetNewTargetOpen, setIsSetNewTargetOpen] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [customShareUser, setCustomShareUser] = useState<AdminUserItem | null>(null);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -323,6 +325,31 @@ export default function App() {
     showToast(settings.language === 'ms' ? 'Sasaran puasa ganti berjaya dikemaskini!' : 'Target days updated successfully!', 'success');
   };
 
+  // Handle Save New Target (Post 100% Completion Cycle or Reset)
+  const handleSaveNewTarget = async (newTotalRequired: number, year?: string, notes?: string) => {
+    const updatedQada: QadaRecord = {
+      id: qada?.id || (`qada_${currentUser?.id || Date.now()}`),
+      user_id: currentUser?.id || ('user_' + Date.now()),
+      total_required: newTotalRequired,
+      total_completed: stats.totalCompleted,
+      remaining: Math.max(0, newTotalRequired - stats.totalCompleted),
+      year: year || qada?.year || 'Ramadan 1447H / 2026',
+      notes: notes !== undefined ? notes : (qada?.notes || ''),
+      created_at: qada?.created_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    saveQadaRecord(updatedQada);
+    setQada(updatedQada);
+    await qadaApi.saveTarget(updatedQada);
+    triggerGoogleSheetAutoSync(updatedQada, records, 'Tetapkan Sasaran Baharu');
+    showToast(
+      settings.language === 'ms'
+        ? `Sasaran baharu berjaya ditetapkan (${newTotalRequired} hari).`
+        : `New target successfully set (${newTotalRequired} days).`,
+      'success'
+    );
+  };
+
   // Handle Update Settings
   const handleUpdateSettings = async (newSettings: UserSettings) => {
     saveSettings(newSettings);
@@ -495,6 +522,7 @@ export default function App() {
                   setCurrentTab={setCurrentTab}
                   onEditRecord={handleOpenEditModal}
                   onOpenShareModal={() => setIsShareModalOpen(true)}
+                  onOpenSetNewTarget={() => setIsSetNewTargetOpen(true)}
                 />
               )}
 
@@ -594,7 +622,20 @@ export default function App() {
         onClose={() => setIsCelebrationOpen(false)}
         language={settings.language}
         totalDaysCompleted={stats.totalCompleted}
+        onOpenSetNewTarget={() => setIsSetNewTargetOpen(true)}
       />
+
+      {/* Set New Target (Post 100% Completion Goal) Modal */}
+      {qada && (
+        <SetNewTargetModal
+          isOpen={isSetNewTargetOpen}
+          onClose={() => setIsSetNewTargetOpen(false)}
+          language={settings.language}
+          currentCompleted={stats.totalCompleted}
+          currentTarget={stats.totalRequired}
+          onSaveNewTarget={handleSaveNewTarget}
+        />
+      )}
 
       {/* Admin User Management Modal */}
       {currentUser?.role === 'admin' && (

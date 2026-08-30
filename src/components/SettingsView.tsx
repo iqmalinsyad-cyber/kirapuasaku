@@ -3,12 +3,12 @@ import {
   Settings as SettingsIcon, Bell, Moon, Sun, Globe, Download, 
   Upload, Trash2, Shield, User as UserIcon, Check, AlertTriangle, 
   Target, RefreshCw, KeyRound, LogOut, Camera, ShieldCheck, CheckCircle2, Lock, Eye, EyeOff,
-  Table, Copy, ExternalLink, Send, ArrowRight, Smartphone, Sparkles, PlusCircle
+  Table, Copy, ExternalLink, Send, ArrowRight, Smartphone, Sparkles, PlusCircle, Bot, MessageCircle
 } from 'lucide-react';
 import { UserSettings, Language, ThemeMode, QadaRecord, ReminderConfig, User, DailyRecord } from '../types';
 import { getTranslation } from '../translations';
 import { exportAllDataAsJSON, importAllDataFromJSON } from '../utils/storage';
-import { authApi } from '../utils/api';
+import { authApi, telegramApi } from '../utils/api';
 import { MUSLIM_AVATARS, MuslimAvatar } from '../utils/avatars';
 import { GOOGLE_APPS_SCRIPT_TEMPLATE, syncToGoogleSheetWebhook } from '../utils/googleSheets';
 import { InstallAppModal } from './InstallAppModal';
@@ -67,9 +67,23 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isChangingPassword, setIsChangingPassword] = useState<boolean>(false);
 
+  // Computed live sync values for Profil & Sasaran
+  const calculatedTotalRequired = qada?.total_required || 0;
+  const calculatedTotalCompleted = records.reduce((sum, r) => sum + r.days, 0);
+  const calculatedRemaining = Math.max(0, calculatedTotalRequired - calculatedTotalCompleted);
+  const calculatedProgressPercent = calculatedTotalRequired > 0 
+    ? Math.min(100, Math.round((calculatedTotalCompleted / calculatedTotalRequired) * 100)) 
+    : 0;
+
   // Target edit state
   const [showTargetModal, setShowTargetModal] = useState<boolean>(false);
-  const [targetInput, setTargetInput] = useState<number>(qada ? qada.total_required : 15);
+  const [targetInput, setTargetInput] = useState<number>(calculatedTotalRequired || 15);
+
+  useEffect(() => {
+    if (qada?.total_required) {
+      setTargetInput(qada.total_required);
+    }
+  }, [qada?.total_required]);
 
   // Reminder local state
   const [reminderConfig, setReminderConfig] = useState<ReminderConfig>(settings.reminder);
@@ -79,6 +93,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [isSyncingSheet, setIsSyncingSheet] = useState<boolean>(false);
   const [showAppsScriptModal, setShowAppsScriptModal] = useState<boolean>(false);
   const [copiedScript, setCopiedScript] = useState<boolean>(false);
+
+  // Telegram Bot Notification state (Admin only)
+  const [telegramToken, setTelegramToken] = useState<string>('');
+  const [telegramChatId, setTelegramChatId] = useState<string>('');
+  const [telegramEnabled, setTelegramEnabled] = useState<boolean>(true);
+  const [isTelegramConfigured, setIsTelegramConfigured] = useState<boolean>(false);
+  const [isSavingTelegram, setIsSavingTelegram] = useState<boolean>(false);
+  const [isTestingTelegram, setIsTestingTelegram] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      telegramApi.getConfig().then((res) => {
+        if (res.data) {
+          setIsTelegramConfigured(res.data.configured);
+          setTelegramEnabled(res.data.enabled);
+          if (res.data.adminChatId) setTelegramChatId(res.data.adminChatId);
+        }
+      }).catch(() => {});
+    }
+  }, [currentUser]);
 
   // Reset confirmation state
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
@@ -285,6 +319,59 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setTimeout(() => setCopiedScript(false), 3000);
   };
 
+  // Save Telegram Bot Notification Config (Admin)
+  const handleSaveTelegramConfig = async () => {
+    setIsSavingTelegram(true);
+    try {
+      const res = await telegramApi.saveConfig(
+        telegramToken.trim() || undefined,
+        telegramChatId.trim() || undefined,
+        telegramEnabled
+      );
+      if (res.data?.success) {
+        setIsTelegramConfigured(res.data.configured);
+        onShowToast(
+          language === 'ms' 
+            ? 'Konfigurasi Notifikasi Bot Telegram berjaya disimpan!' 
+            : 'Telegram Bot Notification config saved!', 
+          'success'
+        );
+        if (telegramToken) setTelegramToken('');
+      } else {
+        onShowToast(res.error || 'Gagal menyimpan konfigurasi Telegram.', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || 'Ralat semasa menyimpan Telegram config.', 'error');
+    } finally {
+      setIsSavingTelegram(false);
+    }
+  };
+
+  // Test Telegram Notification (Admin)
+  const handleTestTelegram = async () => {
+    setIsTestingTelegram(true);
+    try {
+      const res = await telegramApi.testNotification(
+        telegramToken.trim() || undefined,
+        telegramChatId.trim() || undefined
+      );
+      if (res.data?.success) {
+        onShowToast(
+          language === 'ms'
+            ? `Notifikasi ujian berjaya dihantar ke Telegram! ${res.data.botUsername ? `(@${res.data.botUsername})` : ''}`
+            : 'Test notification sent to Telegram successfully!',
+          'success'
+        );
+      } else {
+        onShowToast(res.error || res.data?.message || 'Gagal menghantar notifikasi ujian ke Telegram.', 'error');
+      }
+    } catch (err: any) {
+      onShowToast(err.message || 'Ralat semasa menguji Telegram bot.', 'error');
+    } finally {
+      setIsTestingTelegram(false);
+    }
+  };
+
   // JSON Export / Import
   const handleExport = () => {
     const json = exportAllDataAsJSON();
@@ -472,7 +559,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 required
                 value={profileName}
                 onChange={(e) => setProfileName(e.target.value)}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3.5 py-2 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-800 dark:focus:text-white"
               />
             </div>
 
@@ -486,7 +573,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 required
                 value={profileUsername}
                 onChange={(e) => setProfileUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3.5 py-2 text-xs font-mono text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-mono text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:focus:bg-stone-800 dark:focus:text-white"
               />
             </div>
 
@@ -496,7 +583,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={isUpdatingProfile}
                 className="flex-1 rounded-xl bg-stone-900 text-white py-2.5 text-xs font-bold shadow-2xs hover:bg-stone-800 dark:bg-emerald-700 dark:hover:bg-emerald-600 transition cursor-pointer"
               >
-                {isUpdatingProfile ? 'Menyimpan...' : 'Simpan Profil'}
+                {isUpdatingProfile ? (language === 'ms' ? 'Menyimpan...' : 'Saving...') : (language === 'ms' ? 'Simpan Profil' : 'Save Profile')}
               </button>
 
               {onLogout && (
@@ -520,7 +607,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="border-b border-stone-100 pb-3.5 dark:border-stone-800">
             <h2 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 flex items-center gap-2">
               <KeyRound className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-              <span>Keselamatan & Kata Laluan</span>
+              <span>{t.securityChangePassword}</span>
             </h2>
           </div>
 
@@ -535,7 +622,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 value={currentPassword}
                 onChange={(e) => setCurrentPassword(e.target.value)}
                 placeholder={t.placeholderCurrentPassword}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3.5 py-2 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 dark:focus:text-white"
               />
             </div>
 
@@ -550,7 +637,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 placeholder={t.placeholderNewPassword}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3.5 py-2 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 dark:focus:text-white"
               />
             </div>
 
@@ -565,7 +652,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder={t.placeholderConfirmPassword}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/50 px-3.5 py-2 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 dark:focus:text-white"
               />
             </div>
 
@@ -576,7 +663,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="text-stone-500 hover:text-stone-800 dark:text-stone-400 dark:hover:text-stone-200 flex items-center gap-1 cursor-pointer"
               >
                 {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                <span>{showPassword ? 'Sembunyi' : 'Papar Kata Laluan'}</span>
+                <span>{showPassword ? (language === 'ms' ? 'Sembunyi' : 'Hide') : (language === 'ms' ? 'Papar Kata Laluan' : 'Show Password')}</span>
               </button>
             </div>
 
@@ -585,7 +672,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               disabled={isChangingPassword}
               className="w-full rounded-xl border border-stone-200 bg-stone-50 py-2.5 text-xs font-bold text-stone-800 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 transition cursor-pointer"
             >
-              {isChangingPassword ? 'Mengemaskini...' : t.btnChangePassword}
+              {isChangingPassword ? t.updatingPassword : t.btnChangePassword}
             </button>
           </form>
         </div>
@@ -598,17 +685,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-xs font-bold uppercase tracking-wider text-emerald-900 dark:text-emerald-300 flex items-center gap-2">
                     <Table className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                    <span>Google Sheets Sebagai Database Utama</span>
+                    <span>{t.googleSheetsSectionTitle}</span>
                   </h2>
                   <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[10px] font-bold text-amber-300 dark:bg-stone-800 border border-stone-700">
-                    Khusus Pentadbir (Admin)
+                    {t.googleSheetsAdminOnly}
                   </span>
                   <span className="rounded-md bg-emerald-700 text-white px-2 py-0.5 text-[10px] font-bold">
-                    🟢 Auto-Sync Aktif
+                    🟢 Auto-Sync
                   </span>
                 </div>
                 <p className="text-xs text-stone-600 dark:text-stone-400 mt-1">
-                  Segala data sasaran qada, rekod puasa harian, dan profil pengguna akan disimpan dan diselaraskan secara langsung ke Google Sheet anda sebagai pengkalan data utama.
+                  {t.googleSheetsDesc}
                 </p>
               </div>
 
@@ -633,7 +720,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     value={sheetWebhookUrl}
                     onChange={(e) => setSheetWebhookUrl(e.target.value)}
                     placeholder="https://script.google.com/macros/s/.../exec"
-                    className="flex-1 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                    className="flex-1 rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white dark:placeholder:text-stone-500"
                   />
                   <button
                     type="button"
@@ -649,7 +736,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="text-[11px] text-stone-500 dark:text-stone-400">
                   <span>{t.lastSyncedLabel}: </span>
                   <strong className="text-stone-700 dark:text-stone-300 font-mono">
-                    {settings.lastGoogleSheetSync || 'Auto-sync bersedia (Setiap tindakan direkodkan)'}
+                    {settings.lastGoogleSheetSync || (language === 'ms' ? 'Auto-sync bersedia (Setiap tindakan direkodkan)' : 'Auto-sync ready (Every action recorded)')}
                   </strong>
                 </div>
 
@@ -661,7 +748,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     className="flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold shadow-2xs transition active:scale-[0.98] cursor-pointer"
                   >
                     <Send className="h-3.5 w-3.5" />
-                    <span>{isSyncingSheet ? 'Menyelaraskan ke Google Sheet...' : 'Kemaskini Google Sheet Sekarang'}</span>
+                    <span>{isSyncingSheet ? (language === 'ms' ? 'Menyelaraskan ke Google Sheet...' : 'Syncing to Google Sheets...') : t.btnSyncToGoogleSheet}</span>
                   </button>
                 </div>
               </div>
@@ -669,7 +756,132 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         )}
 
-        {/* 4. Sasaran Puasa Ganti */}
+        {/* 3.1 INTEGRASI NOTIFIKASI BOT TELEGRAM (KHUSUS ADMIN - PENDAFTARAN BAHARU) */}
+        {Boolean(currentUser && currentUser.role === 'admin') && (
+          <div className="md:col-span-2 rounded-2xl border-2 border-sky-600/40 bg-sky-950/10 p-5 shadow-2xs dark:border-sky-500/40 dark:bg-sky-950/20">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-sky-600/20 pb-3.5">
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-sky-900 dark:text-sky-300 flex items-center gap-2">
+                    <Bot className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                    <span>{language === 'ms' ? 'Notifikasi Bot Telegram (Pendaftaran Baharu)' : 'Telegram Bot Alert (New Registrations)'}</span>
+                  </h2>
+                  <span className="rounded-md bg-stone-900 px-2 py-0.5 text-[10px] font-bold text-amber-300 dark:bg-stone-800 border border-stone-700">
+                    {language === 'ms' ? 'Khusus Admin' : 'Admin Only'}
+                  </span>
+                  {isTelegramConfigured ? (
+                    <span className="rounded-md bg-sky-600 text-white px-2 py-0.5 text-[10px] font-bold flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" />
+                      <span>{language === 'ms' ? 'Aktif' : 'Active'}</span>
+                    </span>
+                  ) : (
+                    <span className="rounded-md bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300 px-2 py-0.5 text-[10px] font-bold">
+                      {language === 'ms' ? 'Belum Dikonfigurasi' : 'Not Configured'}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-stone-600 dark:text-stone-400 mt-1">
+                  {language === 'ms'
+                    ? 'Terima notifikasi segera terus ke Telegram anda setiap kali ada pendaftar baru yang memerlukan pengesahan akaun oleh Admin.'
+                    : 'Receive real-time instant alerts on Telegram whenever a new user registers and requires admin approval.'}
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-xl border border-sky-300 bg-white px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-50 dark:border-sky-700 dark:bg-sky-900 dark:text-sky-200 transition cursor-pointer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>@BotFather</span>
+                </a>
+                <a
+                  href="https://t.me/userinfobot"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-xl border border-sky-300 bg-white px-3 py-1.5 text-xs font-bold text-sky-800 hover:bg-sky-50 dark:border-sky-700 dark:bg-sky-900 dark:text-sky-200 transition cursor-pointer"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                  <span>@userinfobot (Dapatkan Chat ID)</span>
+                </a>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-3.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-stone-800 dark:text-stone-200 mb-1">
+                    Telegram Bot Token (dari @BotFather)
+                  </label>
+                  <input
+                    type="password"
+                    value={telegramToken}
+                    onChange={(e) => setTelegramToken(e.target.value)}
+                    placeholder={isTelegramConfigured ? '•••••••••••••••••••• (Telah Ditetapkan)' : 'Contoh: 7123456789:AAFx...'}
+                    className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 placeholder:text-stone-400 focus:border-sky-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white dark:placeholder:text-stone-500"
+                  />
+                  <span className="text-[10px] text-stone-500 dark:text-stone-400 mt-1 block">
+                    Boleh disetkan di sini atau melalui environment variable <code className="font-mono text-[9px] bg-stone-100 dark:bg-stone-800 px-1 py-0.5 rounded">TELEGRAM_BOT_TOKEN</code>.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-stone-800 dark:text-stone-200 mb-1">
+                    Telegram Admin Chat ID (ID anda dari @userinfobot)
+                  </label>
+                  <input
+                    type="text"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="Contoh: 123456789"
+                    className="w-full rounded-xl border border-stone-200 bg-white px-3.5 py-2 text-xs font-mono text-stone-900 placeholder:text-stone-400 focus:border-sky-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white dark:placeholder:text-stone-500"
+                  />
+                  <span className="text-[10px] text-stone-500 dark:text-stone-400 mt-1 block">
+                    ID akaun Telegram peribadi Admin untuk menerima notifikasi.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                <label className="flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300 font-semibold cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={telegramEnabled}
+                    onChange={(e) => setTelegramEnabled(e.target.checked)}
+                    className="rounded border-stone-300 text-sky-600 focus:ring-sky-500 h-4 w-4"
+                  />
+                  <span>{language === 'ms' ? 'Aktifkan Notifikasi Telegram Automatik' : 'Enable Automatic Telegram Notifications'}</span>
+                </label>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={handleTestTelegram}
+                    disabled={isTestingTelegram}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 rounded-xl border border-sky-300 bg-white px-4 py-2 text-xs font-bold text-sky-800 hover:bg-sky-50 dark:border-sky-700 dark:bg-sky-900 dark:text-sky-200 transition cursor-pointer"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{isTestingTelegram ? 'Menghantar Ujian...' : 'Uji Hantar Notifikasi'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleSaveTelegramConfig}
+                    disabled={isSavingTelegram}
+                    className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 rounded-xl bg-sky-700 hover:bg-sky-600 text-white px-4 py-2 text-xs font-bold shadow-2xs transition active:scale-[0.98] cursor-pointer"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>{isSavingTelegram ? 'Menyimpan...' : 'Simpan Tetapan Telegram'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 4. Sasaran Puasa Ganti (Profil & Sasaran - Synced with actual remaining) */}
         <div className="rounded-2xl border border-stone-200/80 bg-white p-5 shadow-2xs dark:border-stone-800 dark:bg-stone-900">
           <div className="flex items-center justify-between border-b border-stone-100 pb-3.5 dark:border-stone-800">
             <h2 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 flex items-center gap-2">
@@ -687,17 +899,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="mt-4 space-y-3">
             <div className="flex justify-between items-center bg-stone-50/80 p-3 rounded-xl border border-stone-200/60 dark:bg-stone-800/60 dark:border-stone-700/60">
               <span className="text-xs text-stone-600 dark:text-stone-300 font-medium">{t.labelTotalDays}</span>
-              <span className="font-mono font-bold text-stone-900 dark:text-white text-sm">{qada?.total_required || 0} hari</span>
+              <span className="font-mono font-bold text-stone-900 dark:text-white text-sm">{calculatedTotalRequired} {t.dayUnitSingular}</span>
+            </div>
+
+            {/* Visual Progress Bar in Profil & Sasaran */}
+            <div>
+              <div className="flex justify-between text-[11px] font-semibold text-stone-500 dark:text-stone-400 mb-1">
+                <span>{t.progressLabel}</span>
+                <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold">{calculatedProgressPercent}%</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-teal-500 transition-all duration-500"
+                  style={{ width: `${calculatedProgressPercent}%` }}
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div className="rounded-xl border border-stone-100 p-2.5 dark:border-stone-800">
+              <div className="rounded-xl border border-stone-100 p-2.5 dark:border-stone-800 bg-stone-50/50 dark:bg-stone-800/40">
                 <span className="text-stone-400 block mb-0.5 text-[11px]">{t.completedLabel}</span>
-                <span className="font-mono font-bold text-stone-800 dark:text-stone-200 text-xs">{qada?.total_completed || 0} hari</span>
+                <span className="font-mono font-bold text-stone-800 dark:text-stone-200 text-xs">{calculatedTotalCompleted} {t.dayUnitSingular}</span>
               </div>
-              <div className="rounded-xl border border-stone-100 p-2.5 dark:border-stone-800">
+              <div className="rounded-xl border border-stone-100 p-2.5 dark:border-stone-800 bg-emerald-50/30 dark:bg-emerald-950/20">
                 <span className="text-stone-400 block mb-0.5 text-[11px]">{t.remainingLabel}</span>
-                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-xs">{qada?.remaining || 0} hari</span>
+                <span className="font-mono font-bold text-emerald-700 dark:text-emerald-400 text-xs">{calculatedRemaining} {t.dayUnitSingular}</span>
               </div>
             </div>
           </div>
@@ -957,45 +1183,90 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       </div>
 
-      {/* MODAL: EDIT TARGET */}
+      {/* MODAL: EDIT TARGET (ONBOARDING STYLE) */}
       {showTargetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900">
-            <h3 className="text-sm font-bold text-stone-900 dark:text-white">
-              {t.editTargetTitle}
-            </h3>
-            <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-              {t.editTargetDesc}
-            </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-950/70 p-4 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="w-full max-w-lg rounded-2xl border border-stone-200/80 bg-white p-6 sm:p-8 shadow-2xl dark:border-stone-800 dark:bg-stone-900 transition-colors relative">
+            <button
+              type="button"
+              onClick={() => setShowTargetModal(false)}
+              className="absolute right-4 top-4 rounded-xl p-1.5 text-stone-400 hover:text-stone-700 hover:bg-stone-100 dark:hover:bg-stone-800 dark:hover:text-stone-200 transition cursor-pointer"
+            >
+              ✕
+            </button>
 
-            <form onSubmit={handleSaveTarget} className="mt-4 space-y-4">
+            <div className="text-center mb-5">
+              <img
+                src="https://lh3.googleusercontent.com/d/1OcU-TrY5DyVXutbYbqzwiZzX7Za2artn"
+                alt="KiraPuasaKu"
+                className="mx-auto mb-2.5 h-12 w-12 object-contain"
+                referrerPolicy="no-referrer"
+              />
+              <h3 className="text-base sm:text-lg font-bold text-stone-900 dark:text-white">
+                {t.onboardingTitle}
+              </h3>
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400 max-w-sm mx-auto">
+                {t.onboardingDesc}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveTarget} className="space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1">
-                  {t.labelTotalDays}
+                <label className="block text-xs font-semibold text-stone-700 dark:text-stone-300 mb-1.5">
+                  {t.labelTotalDays} <span className="text-rose-500">*</span>
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  required
-                  value={targetInput}
-                  onChange={(e) => setTargetInput(parseInt(e.target.value) || 0)}
-                  className="w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-base font-mono font-bold text-emerald-700 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-emerald-300"
-                />
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max="365"
+                    required
+                    value={targetInput}
+                    onChange={(e) => setTargetInput(parseInt(e.target.value) || 0)}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50/80 px-4 py-3 text-2xl font-mono font-bold text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800/80 dark:text-white transition shadow-2xs text-center sm:text-left"
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-stone-400 uppercase">
+                    {t.daysUnit}
+                  </span>
+                </div>
+
+                {/* Quick Presets */}
+                <div className="mt-2.5">
+                  <p className="text-[11px] text-stone-500 dark:text-stone-400 mb-1.5">
+                    {language === 'ms' ? 'Pilihan pantas:' : 'Quick presets:'}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 font-mono">
+                    {[5, 7, 10, 14, 15, 20, 30].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setTargetInput(preset)}
+                        className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
+                          targetInput === preset
+                            ? 'bg-emerald-700 text-white shadow-2xs'
+                            : 'bg-stone-100 text-stone-700 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-750'
+                        }`}
+                      >
+                        {preset} {t.dayUnitSingular}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="pt-2 flex gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowTargetModal(false)}
-                  className="flex-1 rounded-xl border border-stone-200 bg-stone-50 py-2 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 cursor-pointer"
+                  className="flex-1 rounded-xl border border-stone-200 bg-stone-50 py-2.5 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 cursor-pointer"
                 >
                   {t.btnCancel}
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 rounded-xl bg-emerald-700 py-2 text-xs font-bold text-white shadow-2xs hover:bg-emerald-600 transition cursor-pointer"
+                  className="flex-2 flex items-center justify-center gap-2 rounded-xl bg-emerald-700 py-2.5 text-xs font-bold text-white shadow-2xs hover:bg-emerald-600 transition cursor-pointer"
                 >
-                  {t.btnSaveRecord}
+                  <span>{language === 'ms' ? 'Simpan Sasaran' : 'Save Target'}</span>
                 </button>
               </div>
             </form>
@@ -1030,7 +1301,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-stone-100 dark:border-stone-800">
               <span className="text-[11px] text-stone-500">
-                Langkah: Extensions &gt; Apps Script &gt; Paste &gt; Deploy as Web App.
+                {t.appsScriptSteps}
               </span>
 
               <div className="flex items-center gap-2 w-full sm:w-auto">
@@ -1040,14 +1311,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-600 transition cursor-pointer"
                 >
                   {copiedScript ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  <span>{copiedScript ? 'Tersalin!' : t.btnCopyScript}</span>
+                  <span>{copiedScript ? (language === 'ms' ? 'Tersalin!' : 'Copied!') : t.btnCopyScript}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowAppsScriptModal(false)}
                   className="rounded-xl border border-stone-200 bg-stone-50 px-4 py-2 text-xs font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-300 cursor-pointer"
                 >
-                  Tutup
+                  {t.closeBtn}
                 </button>
               </div>
             </div>

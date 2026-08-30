@@ -4,6 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { sendVerificationEmail, testSMTPConnection, isSMTPConfigured } from './mailer';
+import { sendNewUserRegistrationAlert, testTelegramBot, isTelegramConfigured, TelegramConfig } from './telegram';
 
 // Type definitions for Server Database
 export type UserRole = 'admin' | 'user';
@@ -38,10 +39,15 @@ export interface UserDataStore {
   settings: any;
 }
 
+export interface SystemSettings {
+  telegram?: TelegramConfig;
+}
+
 interface DatabaseSchema {
   users: UserRecord[];
   sessions: SessionRecord[];
   userData: Record<string, UserDataStore>; // keyed by userId
+  systemSettings?: SystemSettings;
 }
 
 // In-memory + File Storage
@@ -115,37 +121,8 @@ function createInitialDatabase(): DatabaseSchema {
     sessions: [],
     userData: {
       [defaultAdmin.id]: {
-        qada: {
-          id: 'qada_admin',
-          user_id: defaultAdmin.id,
-          total_required: 10,
-          total_completed: 4,
-          remaining: 6,
-          year: '1447H / 2026',
-          notes: 'Puasa ganti pentadbir',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        records: [
-          {
-            id: 'rec_admin_1',
-            qada_record_id: 'qada_admin',
-            date: new Date(Date.now() - 86400000 * 3).toISOString().split('T')[0],
-            days: 2,
-            notes: 'Puasa Isnin & Selasa',
-            created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-            updated_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-          },
-          {
-            id: 'rec_admin_2',
-            qada_record_id: 'qada_admin',
-            date: new Date(Date.now() - 86400000).toISOString().split('T')[0],
-            days: 2,
-            notes: 'Puasa Khamis & Jumaat',
-            created_at: new Date(Date.now() - 86400000).toISOString(),
-            updated_at: new Date(Date.now() - 86400000).toISOString(),
-          }
-        ],
+        qada: null,
+        records: [],
         settings: {
           theme: 'light',
           language: 'ms',
@@ -153,10 +130,10 @@ function createInitialDatabase(): DatabaseSchema {
           reminder: {
             id: 'rem_admin',
             user_id: defaultAdmin.id,
-            enabled: true,
+            enabled: false,
             days: [1, 4],
             time: '20:00',
-            message: 'Peringatan puasa ganti admin',
+            message: 'Peringatan puasa ganti',
             created_at: new Date().toISOString(),
           }
         }
@@ -230,6 +207,15 @@ function loadDatabase() {
             u.email_verified = true;
           }
         });
+        if (!loaded.systemSettings) {
+          loaded.systemSettings = {
+            telegram: {
+              botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+              adminChatId: process.env.TELEGRAM_ADMIN_CHAT_ID || '',
+              enabled: true,
+            }
+          };
+        }
         db = loaded;
         return;
       }
@@ -516,6 +502,19 @@ async function startServer() {
         .catch((e) => {
           console.error('[SMTP Nodemailer] Unexpected error:', e);
         });
+    }
+
+    // Trigger Telegram notification to Admin
+    if (isTelegramConfigured(db.systemSettings?.telegram)) {
+      sendNewUserRegistrationAlert(newUser, db.systemSettings?.telegram)
+        .then((tgRes) => {
+          if (tgRes.success) {
+            console.log(`[Telegram Bot] New registration alert sent to admin for @${cleanUsername}`);
+          } else {
+            console.warn(`[Telegram Bot] Alert failed: ${tgRes.error}`);
+          }
+        })
+        .catch((e) => console.error('[Telegram Bot] Unexpected alert error:', e));
     }
 
     return res.status(201).json({
@@ -1091,6 +1090,96 @@ async function startServer() {
       success: true,
       message: `Emel ujian pengesahan telah berjaya dihantar ke ${recipient}!`,
       messageId: result.messageId,
+    });
+  });
+
+  // 9.3 Get Telegram Bot Configuration (Admin only)
+  app.get('/api/admin/telegram-config', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const tgConfig = db.systemSettings?.telegram || {};
+    const envToken = process.env.TELEGRAM_BOT_TOKEN || '';
+    const envChatId = process.env.TELEGRAM_ADMIN_CHAT_ID || '';
+
+    const activeToken = tgConfig.botToken || envToken;
+    const activeChatId = tgConfig.adminChatId || envChatId;
+    const isConfigured = Boolean(activeToken && activeChatId);
+
+    let maskedToken = '';
+    if (activeToken) {
+      maskedToken = activeToken.length > 10
+        ? `${activeToken.slice(0, 6)}...${activeToken.slice(-4)}`
+        : '******';
+    }
+
+    return res.json({
+      configured: isConfigured,
+      enabled: tgConfig.enabled !== false,
+      adminChatId: activeChatId || '',
+      maskedToken,
+      hasEnvFallback: Boolean(envToken && envChatId),
+    });
+  });
+
+  // 9.4 Update Telegram Bot Configuration (Admin only)
+  app.post('/api/admin/telegram-config', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { botToken, adminChatId, enabled } = req.body;
+
+    if (!db.systemSettings) {
+      db.systemSettings = {};
+    }
+
+    const currentTg = db.systemSettings.telegram || {};
+
+    let finalToken = currentTg.botToken || process.env.TELEGRAM_BOT_TOKEN || '';
+    if (botToken && typeof botToken === 'string' && !botToken.includes('...')) {
+      finalToken = botToken.trim();
+    }
+
+    db.systemSettings.telegram = {
+      botToken: finalToken,
+      adminChatId: adminChatId !== undefined ? String(adminChatId).trim() : (currentTg.adminChatId || ''),
+      enabled: enabled !== undefined ? Boolean(enabled) : true,
+    };
+
+    saveDatabase();
+
+    return res.json({
+      success: true,
+      message: 'Tetapan Bot Telegram berjaya disimpan!',
+      configured: Boolean(db.systemSettings.telegram.botToken && db.systemSettings.telegram.adminChatId),
+      enabled: db.systemSettings.telegram.enabled,
+    });
+  });
+
+  // 9.5 Test Telegram Bot Connection & Send Test Message (Admin only)
+  app.post('/api/admin/telegram-test', verifyToken, verifyAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    const { botToken, adminChatId } = req.body;
+
+    const tokenToTest = (botToken && typeof botToken === 'string' && !botToken.includes('...'))
+      ? String(botToken).trim()
+      : (db.systemSettings?.telegram?.botToken || process.env.TELEGRAM_BOT_TOKEN || '');
+
+    const chatIdToTest = adminChatId
+      ? String(adminChatId).trim()
+      : (db.systemSettings?.telegram?.adminChatId || process.env.TELEGRAM_ADMIN_CHAT_ID || '');
+
+    if (!tokenToTest || !chatIdToTest) {
+      return res.status(400).json({
+        error: 'Sila masukkan Bot Token dan Admin Chat ID terlebih dahulu untuk diuji.',
+      });
+    }
+
+    const testRes = await testTelegramBot(tokenToTest, chatIdToTest);
+
+    if (!testRes.success) {
+      return res.status(400).json({
+        error: testRes.error || 'Ujian sambungan Telegram gagal.',
+      });
+    }
+
+    return res.json({
+      success: true,
+      botName: testRes.botName,
+      message: `Ujian berjaya! Mesej telah dihantar ke Chat ID (${chatIdToTest}) melalui bot @${testRes.botName}.`,
     });
   });
 

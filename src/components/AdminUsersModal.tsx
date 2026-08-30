@@ -354,8 +354,8 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                   type="email"
                   value={testEmailInput}
                   onChange={(e) => setTestEmailInput(e.target.value)}
-                  placeholder="contoh: emelanda@gmail.com"
-                  className="flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-xs font-medium text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                  placeholder={language === 'ms' ? 'contoh: emelanda@gmail.com' : 'e.g. yourmail@gmail.com'}
+                  className="flex-1 rounded-xl border border-stone-200 bg-stone-50/80 px-3.5 py-2 text-xs font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 dark:focus:text-white"
                 />
                 <button
                   type="button"
@@ -366,12 +366,12 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                   {isTestingSMTP ? (
                     <>
                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      <span>Sedang Menghantar...</span>
+                      <span>{language === 'ms' ? 'Sedang Menghantar...' : 'Sending...'}</span>
                     </>
                   ) : (
                     <>
                       <Send className="h-3.5 w-3.5" />
-                      <span>Hantar Emel Ujian</span>
+                      <span>{language === 'ms' ? 'Hantar Emel Ujian' : 'Send Test Email'}</span>
                     </>
                   )}
                 </button>
@@ -506,7 +506,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder={language === 'ms' ? 'Cari pengguna...' : 'Search users...'}
-                    className="w-full rounded-xl border border-stone-200 bg-stone-50/60 pl-8 pr-3 py-1 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50/80 pl-8 pr-3 py-1 text-xs font-semibold text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 dark:focus:text-white"
                   />
                 </div>
 

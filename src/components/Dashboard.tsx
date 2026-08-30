@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, Calendar as CalendarIcon, ChevronRight, Zap, Download, Sparkles, CheckCircle2, ArrowUpRight, Share2, BookOpen, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Plus, Calendar as CalendarIcon, ChevronRight, Zap, Download, Sparkles, CheckCircle2, ArrowUpRight, Share2, BookOpen, ExternalLink, ShieldCheck, Target } from 'lucide-react';
 import { QadaRecord, DailyRecord, Language, NavigationTab } from '../types';
 import { getTranslation } from '../translations';
 import { formatDateMalay, getTodayDateString } from '../utils/date';
@@ -21,6 +21,7 @@ interface DashboardProps {
   setCurrentTab: (tab: NavigationTab) => void;
   onEditRecord: (record: DailyRecord) => void;
   onOpenShareModal?: () => void;
+  onOpenSetNewTarget?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -38,6 +39,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   setCurrentTab,
   onEditRecord,
   onOpenShareModal,
+  onOpenSetNewTarget,
 }) => {
   const t = getTranslation(language);
 
@@ -179,7 +181,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
               <div>
                 <span className="inline-block rounded-md bg-amber-200/60 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border border-amber-300/40 mb-1">
-                  100% Selesai
+                  100% {language === 'ms' ? 'Selesai' : 'Completed'}
                 </span>
                 <h3 className="text-base sm:text-lg font-bold tracking-tight text-stone-900 dark:text-white">
                   {t.congratsTitle}
@@ -190,13 +192,26 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </div>
             
-            <button
-              id="dashboard-view-summary-btn"
-              onClick={() => setCurrentTab('progress')}
-              className="rounded-xl bg-stone-900 text-white px-4 py-2 text-xs font-bold shadow-xs hover:bg-stone-800 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300 shrink-0 cursor-pointer"
-            >
-              {language === 'ms' ? 'Lihat Ringkasan Penuh' : 'View Full Summary'}
-            </button>
+            <div className="flex items-center gap-2.5 flex-wrap justify-center sm:justify-end shrink-0">
+              {onOpenSetNewTarget && (
+                <button
+                  id="dashboard-new-target-banner-btn"
+                  onClick={onOpenSetNewTarget}
+                  className="flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white px-4 py-2 text-xs font-bold shadow-xs transition active:scale-[0.98] cursor-pointer"
+                >
+                  <Target className="h-4 w-4" />
+                  <span>{t.btnSetNewTarget}</span>
+                </button>
+              )}
+
+              <button
+                id="dashboard-view-summary-btn"
+                onClick={() => setCurrentTab('progress')}
+                className="rounded-xl bg-stone-900 text-white px-4 py-2 text-xs font-bold shadow-xs hover:bg-stone-800 dark:bg-amber-400 dark:text-stone-950 dark:hover:bg-amber-300 transition cursor-pointer"
+              >
+                {language === 'ms' ? 'Lihat Ringkasan Penuh' : 'View Full Summary'}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -257,14 +272,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
               {/* Quick Actions */}
               <div className="mt-7 flex flex-col sm:flex-row gap-2.5 w-full max-w-md">
-                <button
-                  id="dashboard-primary-add-btn"
-                  onClick={onOpenAddModal}
-                  className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white py-3 px-4 text-xs font-bold shadow-2xs transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  <Plus className="h-4 w-4 stroke-[2.5]" />
-                  <span>{t.btnRecordQada}</span>
-                </button>
+                {isCompleted && onOpenSetNewTarget ? (
+                  <button
+                    id="dashboard-hero-new-target-btn"
+                    onClick={onOpenSetNewTarget}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white py-3 px-4 text-xs font-bold shadow-2xs transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Target className="h-4 w-4" />
+                    <span>{t.btnSetNewTarget}</span>
+                  </button>
+                ) : (
+                  <button
+                    id="dashboard-primary-add-btn"
+                    onClick={onOpenAddModal}
+                    className="flex-1 flex items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white py-3 px-4 text-xs font-bold shadow-2xs transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4 stroke-[2.5]" />
+                    <span>{t.btnRecordQada}</span>
+                  </button>
+                )}
 
                 {!isCompleted && (
                   <button
@@ -491,7 +517,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="pt-2.5 border-t border-stone-200/60 dark:border-stone-800/60">
               <p className="text-[9px] font-bold uppercase tracking-wider text-stone-400 mb-1.5 flex items-center gap-1">
                 <ShieldCheck className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
-                <span>Sumber Rujukan Sahih:</span>
+                <span>{t.guidanceAuthenticSources}</span>
               </p>
               <div className="flex flex-col gap-1 text-[11px]">
                 <a
@@ -529,7 +555,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               className="w-full py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold transition shadow-2xs cursor-pointer flex items-center justify-center gap-1.5"
             >
               <BookOpen className="h-3.5 w-3.5" />
-              <span>Baca Panduan Fiqh & Hadis Penuh</span>
+              <span>{t.btnReadGuidance}</span>
             </button>
           </div>
 
