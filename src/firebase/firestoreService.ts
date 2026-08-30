@@ -318,6 +318,18 @@ export const firestoreService = {
       if (snap.exists()) {
         return snap.data() as QadaRecord;
       }
+      // If admin, check possible admin IDs
+      if (userId.includes('admin') || userId === 'admin_root' || userId === 'user_admin_001' || userId === 'admin') {
+        const fallbacks = ['admin_root', 'user_admin_001', 'admin'];
+        for (const fb of fallbacks) {
+          if (fb !== userId) {
+            const fbSnap = await getDoc(doc(db, QADA_COLLECTION, fb)).catch(() => null);
+            if (fbSnap && fbSnap.exists()) {
+              return fbSnap.data() as QadaRecord;
+            }
+          }
+        }
+      }
       return null;
     } catch (err) {
       console.warn('Firestore getQadaTarget err:', err);

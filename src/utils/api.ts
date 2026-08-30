@@ -527,6 +527,9 @@ export const adminApi = {
 export const qadaApi = {
   async getData() {
     const currentUser = getStoredUser();
+    const localQada = getQadaRecord();
+    const localRecords = getDailyRecords();
+    const localSettings = getInitialSettings();
     
     // Attempt Firestore cloud sync if user is logged in
     if (currentUser?.id) {
@@ -537,24 +540,40 @@ export const qadaApi = {
           firestoreService.getUserSettings(currentUser.id),
         ]);
 
-        if (cloudQada) {
-          saveQadaRecord(cloudQada);
-        } else {
-          try {
-            localStorage.removeItem('qadatrack_qada_v1');
-          } catch {}
+        const finalQada = cloudQada || localQada;
+
+        if (finalQada) {
+          saveQadaRecord(finalQada);
+          // If locally exists but not yet in cloud, sync to Firestore
+          if (!cloudQada && localQada) {
+            firestoreService.saveQadaTarget(currentUser.id, localQada).catch((e) => console.warn(e));
+          }
         }
 
-        if (Array.isArray(cloudRecords)) {
-          saveDailyRecords(cloudRecords);
+        const finalRecords = (Array.isArray(cloudRecords) && cloudRecords.length > 0)
+          ? cloudRecords
+          : (localRecords.length > 0 ? localRecords : (Array.isArray(cloudRecords) ? cloudRecords : []));
+
+        if (finalRecords.length > 0) {
+          saveDailyRecords(finalRecords);
+          if ((!cloudRecords || cloudRecords.length === 0) && localRecords.length > 0) {
+            firestoreService.saveDailyRecords(currentUser.id, localRecords).catch((e) => console.warn(e));
+          }
         }
-        if (cloudSettings) saveSettings(cloudSettings);
+
+        const finalSettings = cloudSettings || localSettings;
+        if (finalSettings) {
+          saveSettings(finalSettings);
+          if (!cloudSettings && localSettings) {
+            firestoreService.saveUserSettings(currentUser.id, localSettings).catch((e) => console.warn(e));
+          }
+        }
 
         return {
           data: {
-            qada: cloudQada || null,
-            records: Array.isArray(cloudRecords) ? cloudRecords : [],
-            settings: cloudSettings || getInitialSettings(),
+            qada: finalQada,
+            records: finalRecords,
+            settings: finalSettings,
           }
         };
       } catch (err) {
@@ -563,12 +582,12 @@ export const qadaApi = {
     }
 
     const res = await apiRequest<{ qada: QadaRecord | null; records: DailyRecord[]; settings: UserSettings }>('/api/qada/data');
-    if (res.code === 'BACKEND_UNAVAILABLE') {
+    if (res.code === 'BACKEND_UNAVAILABLE' || res.error) {
       return {
         data: {
-          qada: getQadaRecord(),
-          records: getDailyRecords(),
-          settings: getInitialSettings(),
+          qada: localQada,
+          records: localRecords,
+          settings: localSettings,
         }
       };
     }

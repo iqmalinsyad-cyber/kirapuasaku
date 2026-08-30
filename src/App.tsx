@@ -96,8 +96,6 @@ export default function App() {
         if (res.data.qada) {
           setQada(res.data.qada);
           saveQadaRecord(res.data.qada);
-        } else {
-          setQada(null);
         }
         if (Array.isArray(res.data.records)) {
           setRecords(res.data.records);
