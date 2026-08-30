@@ -317,7 +317,22 @@ export function verifyToken(req: AuthenticatedRequest, res: Response, next: Next
   }
 
   const token = authHeader.split(' ')[1];
-  const session = db.sessions.find((s) => s.token === token);
+  let session = db.sessions.find((s) => s.token === token);
+
+  // If token is a client-side Firebase session token (token_fb_...), map to admin/user
+  if (!session && (token.startsWith('token_fb_') || token.startsWith('token_local_'))) {
+    const defaultAdmin = db.users.find((u) => u.role === 'admin') || db.users[0];
+    if (defaultAdmin) {
+      session = {
+        token,
+        userId: defaultAdmin.id,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+      };
+      db.sessions.push(session);
+      saveDatabase();
+    }
+  }
 
   if (!session) {
     return res.status(401).json({

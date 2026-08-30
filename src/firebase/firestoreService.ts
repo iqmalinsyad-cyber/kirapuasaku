@@ -225,7 +225,27 @@ export const firestoreService = {
   // Verify email by admin
   async setUserEmailVerified(userId: string, email_verified: boolean): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, { email_verified });
+    await updateDoc(userRef, { email_verified, status: email_verified ? 'approved' : 'pending' });
+  },
+
+  // Verify email via link token/email
+  async verifyUserByEmailOrId(identifier: string): Promise<boolean> {
+    try {
+      const user = await this.findUserByIdentifier(identifier);
+      if (user) {
+        const userRef = doc(db, USERS_COLLECTION, user.id);
+        await updateDoc(userRef, {
+          email_verified: true,
+          status: 'approved',
+          updated_at: new Date().toISOString(),
+        });
+        return true;
+      }
+      return false;
+    } catch (err) {
+      console.error('verifyUserByEmailOrId error:', err);
+      return false;
+    }
   },
 
   // Delete user from Firestore

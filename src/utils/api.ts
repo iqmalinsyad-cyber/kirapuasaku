@@ -109,74 +109,65 @@ export const authApi = {
       message: string;
       email: string;
       username: string;
+      requiresEmailVerification?: boolean;
       token?: string;
       expiresAt?: number;
-      user: User;
+      user?: User;
     }>('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({ username: cleanUser, email: cleanEmail, password, avatar, name: displayName }),
     });
 
-    if (res.code === 'BACKEND_UNAVAILABLE') {
-      try {
-        await firestoreService.ensureAdminExists();
-        const existing = await firestoreService.findUserByIdentifier(cleanUser) || 
-                         await firestoreService.findUserByIdentifier(cleanEmail);
+    // Also register in Firestore for cross-browser synchronization
+    try {
+      await firestoreService.ensureAdminExists();
+      const existing = await firestoreService.findUserByIdentifier(cleanUser) || 
+                       await firestoreService.findUserByIdentifier(cleanEmail);
 
-        if (existing) {
-          return {
-            error: 'Nama pengguna atau alamat emel telah didaftarkan dalam sistem.',
-            code: 'USER_EXISTS'
-          };
-        }
-
+      if (!existing) {
         const newUser: User = {
           id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
           username: cleanUser,
           name: displayName,
           email: cleanEmail,
-          email_verified: true,
+          email_verified: false, // Requires email link verification
           role: 'user',
-          status: 'approved',
-          avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+          status: 'pending',
+          avatar: avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUser)}`,
           created_at: new Date().toISOString(),
         };
-
         await firestoreService.registerUser(newUser, password);
-
-        const token = 'token_fb_' + Date.now();
-        setStoredToken(token);
-        setStoredUser(newUser);
-
-        return {
-          data: {
-            success: true,
-            message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
-            email: cleanEmail,
-            username: cleanUser,
-            token,
-            expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-            user: newUser,
-          }
-        };
-      } catch (err: any) {
-        console.error('Firebase registration error:', err);
-        return {
-          error: 'Ralat pangkalan data Firebase. Sila cuba sebentar lagi.',
-          code: 'FIREBASE_ERROR'
-        };
       }
+    } catch (fsErr) {
+      console.warn('Firestore registration sync notice:', fsErr);
     }
 
-    if (res.data?.token && res.data?.user) {
-      setStoredToken(res.data.token);
-      setStoredUser(res.data.user);
+    if (res.code === 'BACKEND_UNAVAILABLE') {
+      return {
+        data: {
+          success: true,
+          message: `Pendaftaran akaun berjaya! Sila semak peti masuk emel (${cleanEmail}) untuk mengesahkan akaun anda.`,
+          email: cleanEmail,
+          username: cleanUser,
+          requiresEmailVerification: true,
+        }
+      };
     }
 
     return res;
   },
 
   async verifyEmail(token: string, email?: string) {
+    // 1. Sync Firestore verification status
+    if (email) {
+      try {
+        await firestoreService.verifyUserByEmailOrId(email);
+      } catch (e) {
+        console.warn('Firestore email verification sync notice:', e);
+      }
+    }
+
+    // 2. Call backend verification endpoint
     const res = await apiRequest<{ success: boolean; message: string; user?: User }>('/api/auth/verify-email', {
       method: 'POST',
       body: JSON.stringify({ token, email }),
@@ -186,7 +177,7 @@ export const authApi = {
       return {
         data: {
           success: true,
-          message: 'Alamat emel berjaya disahkan.',
+          message: 'Alamat emel berjaya disahkan. Sila log masuk ke akaun anda.',
         }
       };
     }
@@ -203,7 +194,7 @@ export const authApi = {
 
   async login(username: string, password: string) {
     const cleanUser = username.trim().toLowerCase();
-    const res = await apiRequest<{ token: string; user: User; expiresAt: number; verificationToken?: string; email?: string }>('/api/auth/login', {
+    const res = await apiRequest<{ token: string; user: User; expiresAt: number; verificationToken?: string; email?: string; code?: string }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username: cleanUser, password }),
     });
@@ -226,6 +217,16 @@ export const authApi = {
           return {
             error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
             code: 'INVALID_CREDENTIALS'
+          };
+        }
+
+        // Check if email verification is required
+        if (firestoreUser.role !== 'admin' && firestoreUser.email_verified === false) {
+          return {
+            error: 'Alamat emel anda belum disahkan. Sila semak peti masuk emel anda dan klik pautan pengesahan.',
+            code: 'EMAIL_NOT_VERIFIED',
+            email: firestoreUser.email,
+            username: firestoreUser.username,
           };
         }
 
