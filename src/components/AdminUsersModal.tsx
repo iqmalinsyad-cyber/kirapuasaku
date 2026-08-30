@@ -395,18 +395,35 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
               )}
             </div>
 
-            {/* Quick 3-Step Setup Guide */}
-            <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/50">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-3 flex items-center gap-1.5">
+            {/* Quick 3-Step Setup Guide & Cloudflare Notice */}
+            <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/50 space-y-4">
+              
+              {/* Cloudflare Pages vs Node.js Notice */}
+              <div className="rounded-xl border border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/30 p-3.5 text-xs text-blue-950 dark:text-blue-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-blue-900 dark:text-blue-100">
+                  <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>Nota Penting Mengenai Cloudflare Pages vs Pelayan Node.js</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-blue-800 dark:text-blue-300">
+                  <strong>Cloudflare Pages</strong> adalah platform pengehosan <em>Frontend Statik</em>. Fail <code className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1 rounded">server.ts</code> (Express + Nodemailer) memerlukan persekitaran <strong>Node.js</strong> (seperti Google Cloud Run, Render, Railway, atau VPS) untuk menghantar emel keluar secara langsung.
+                </p>
+                <div className="pt-1 border-t border-blue-200/80 dark:border-blue-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                  <span className="text-[10px] text-blue-700 dark:text-blue-400">
+                    💡 <strong>Tip Pentadbir:</strong> Jika anda mengehos di Cloudflare Pages, anda boleh mengesahkan emel pengguna baru dengan 1-klik di tab <strong>"Senarai Pengguna"</strong> (tekan butang hijau <strong>"Sahkan Emel"</strong>).
+                  </span>
+                </div>
+              </div>
+
+              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-1 flex items-center gap-1.5">
                 <Info className="h-3.5 w-3.5 text-stone-500" />
-                <span>Panduan 3 Langkah Mengaktifkan SMTP Gmail</span>
+                <span>Panduan 3 Langkah Mengaktifkan SMTP Gmail (Node.js / Cloud Run)</span>
               </h4>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">1</span>
                   <div>
-                    <p className="text-xs font-bold text-stone-900 dark:text-white">Aktifkan 2-Step Verification</p>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Aktifkan 2-Step Verification di Google</p>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
                       Buka akaun Google anda dan pastikan Pengesahan 2 Langkah (2FA) dihidupkan.
                     </p>
@@ -426,9 +443,9 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">3</span>
                   <div>
-                    <p className="text-xs font-bold text-stone-900 dark:text-white">Masukkan Nilai dalam Settings / .env</p>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Masukkan Nilai dalam Pelayan Node.js / .env</p>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
-                      Tetapkan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_USER=emelanda@gmail.com</code> dan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_PASS=abcdefghijklmnop</code>.
+                      Tetapkan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_USER=emelanda@gmail.com</code> dan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_PASS=abcdefghijklmnop</code> di dalam tetapan pelayan Node.js anda.
                     </p>
                   </div>
                 </div>
