@@ -482,8 +482,30 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 )}
               </button>
 
+              {/* Quick Admin Demo Autofill Helper */}
+              <div className="rounded-2xl border border-stone-200/80 bg-stone-50/80 p-3 dark:border-stone-800 dark:bg-stone-800/40">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-stone-600 dark:text-stone-300">
+                    <ShieldCheck className="h-3.5 w-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Akaun Pentadbir (Admin):</span>
+                    <span className="font-mono bg-white dark:bg-stone-800 px-1.5 py-0.5 rounded border border-stone-200 dark:border-stone-700 text-stone-900 dark:text-white">admin</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginIdentifier('admin');
+                      setLoginPassword('admin123');
+                      setErrorMessage('');
+                    }}
+                    className="rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:hover:bg-blue-900/60 dark:text-blue-300 px-2 py-1 text-[10px] font-bold transition cursor-pointer border border-blue-200 dark:border-blue-800/60"
+                  >
+                    Isi Pentadbir
+                  </button>
+                </div>
+              </div>
+
               {/* Quick switch to register prompt on mobile */}
-              <div className="text-center pt-2">
+              <div className="text-center pt-1">
                 <p className="text-xs text-stone-500 dark:text-stone-400">
                   {language === 'ms' ? 'Belum mempunyai akaun?' : "Don't have an account?"}{' '}
                   <button
