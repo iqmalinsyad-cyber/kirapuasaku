@@ -32,7 +32,7 @@ export function setStoredUser(user: User): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-// Generic API fetch wrapper that injects Bearer token
+// Generic API fetch wrapper that injects Bearer token with quick timeout for static fallbacks
 export async function apiRequest<T = any>(
   endpoint: string,
   options: RequestInit = {}
@@ -56,11 +56,17 @@ export async function apiRequest<T = any>(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
+  // Use AbortController with a 3.5-second timeout so static Cloudflare Pages immediately falls back to fast Firestore
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 3500);
+
   try {
     const res = await fetch(endpoint, {
       ...options,
       headers,
+      signal: options.signal || controller.signal,
     });
+    clearTimeout(timeoutId);
 
     // Detect if static server (e.g. Cloudflare Pages SPA redirects) returned HTML instead of JSON
     const contentType = res.headers.get('content-type') || '';
@@ -90,6 +96,7 @@ export async function apiRequest<T = any>(
 
     return { data };
   } catch (err: any) {
+    clearTimeout(timeoutId);
     return { 
       error: 'Gagal menyambung ke pelayan backend.',
       code: 'BACKEND_UNAVAILABLE'
@@ -384,13 +391,17 @@ export const authApi = {
 
     if (current) {
       try {
-        const firestoreUser = await firestoreService.findUserByIdentifier(current.id);
+        const firestoreUser = await firestoreService.findUserByIdentifier(current.id) ||
+                              await firestoreService.findUserByIdentifier(current.username);
         if (firestoreUser) {
-          const isValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, currentPassword);
+          const isValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, currentPassword, firestoreUser.role);
           if (!isValid) {
             return { error: 'Kata laluan semasa tidak tepat.' };
           }
-          await firestoreService.updateUserPassword(current.id, newPassword);
+          await firestoreService.updateUserPassword(firestoreUser.id, newPassword);
+          if (firestoreUser.username === 'admin') {
+            await firestoreService.updateUserPassword('admin_root', newPassword);
+          }
         }
       } catch (err) {
         console.warn('Firestore change password notice:', err);
@@ -403,7 +414,7 @@ export const authApi = {
     });
 
     if (res.code === 'BACKEND_UNAVAILABLE') {
-      return { data: { message: 'Kata laluan berjaya ditukar dan disegerakkan ke pelayan awan.' } };
+      return { data: { message: 'Kata laluan berjaya ditukar dan disimpan secara kekal.' } };
     }
 
     return res;
@@ -532,13 +543,16 @@ export const qadaApi = {
         ]);
 
         if (cloudQada) saveQadaRecord(cloudQada);
-        if (cloudRecords && cloudRecords.length > 0) saveDailyRecords(cloudRecords);
+        // Persist whatever Firestore returns (even empty array if user deleted records)
+        if (Array.isArray(cloudRecords)) {
+          saveDailyRecords(cloudRecords);
+        }
         if (cloudSettings) saveSettings(cloudSettings);
 
         return {
           data: {
             qada: cloudQada || getQadaRecord(),
-            records: (cloudRecords && cloudRecords.length > 0) ? cloudRecords : getDailyRecords(),
+            records: Array.isArray(cloudRecords) ? cloudRecords : getDailyRecords(),
             settings: cloudSettings || getInitialSettings(),
           }
         };
@@ -599,7 +613,7 @@ export const qadaApi = {
   async resetData() {
     const currentUser = getStoredUser();
     if (currentUser?.id) {
-      firestoreService.saveDailyRecords(currentUser.id, []).catch((e) => console.warn(e));
+      firestoreService.resetUserData(currentUser.id).catch((e) => console.warn(e));
     }
     return apiRequest('/api/qada/reset', {
       method: 'POST',

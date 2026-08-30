@@ -692,13 +692,6 @@ async function startServer() {
       });
     }
 
-    // If master admin password was used, sync hash so subsequent logins work smoothly
-    if (isMasterAdminPassword && computedHash !== user.passwordHash) {
-      user.salt = generateSalt();
-      user.passwordHash = hashPassword(password, user.salt);
-      saveDatabase();
-    }
-
     // Check User Status
     if (user.status === 'rejected') {
       return res.status(403).json({

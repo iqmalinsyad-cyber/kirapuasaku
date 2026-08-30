@@ -3,7 +3,7 @@ import {
   User as UserIcon, Lock, Mail, ShieldAlert, 
   Eye, EyeOff, AlertCircle, ArrowRight, CheckCircle2, 
   RefreshCw, Sparkles, Globe, Sun, Moon, ShieldCheck,
-  Send, Inbox, ExternalLink, Info
+  Send, Inbox, ExternalLink, Info, MessageCircle, HelpCircle
 } from 'lucide-react';
 import { Language, ThemeMode, User } from '../types';
 import { getTranslation } from '../translations';
@@ -464,6 +464,37 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         ? 'Sekiranya emel tidak kelihatan di peti masuk utama (Inbox), sila periksa folder Spam atau Junk Mail anda.' 
                         : 'If you do not see the email in your main inbox, please check your Spam or Junk folder.'}
                     </span>
+                  </div>
+
+                  {/* Hubungi Admin Card if email is not received */}
+                  <div className="p-3 bg-stone-100/90 dark:bg-stone-800/80 rounded-xl border border-stone-200 dark:border-stone-700 text-xs space-y-2.5">
+                    <div className="flex items-center gap-2 text-stone-900 dark:text-white font-bold text-[11px] sm:text-xs">
+                      <HelpCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span>{language === 'ms' ? 'Masih belum terima emel pengesahan?' : 'Still haven’t received the email?'}</span>
+                    </div>
+                    <p className="text-[11px] text-stone-600 dark:text-stone-300 leading-relaxed">
+                      {language === 'ms'
+                        ? 'Sila hubungi Admin untuk bantuan pengaktifan segera atau pengesahan akaun manual:'
+                        : 'Please contact the Admin for instant account activation or manual verification assistance:'}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <a
+                        href={`https://wa.me/60123456789?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-xs"
+                      >
+                        <MessageCircle className="h-3.5 w-3.5" />
+                        <span>WhatsApp Admin</span>
+                      </a>
+                      <a
+                        href={`mailto:admin@kirapuasaku.app?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
+                        className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-xs"
+                      >
+                        <Mail className="h-3.5 w-3.5" />
+                        <span>Emel Admin</span>
+                      </a>
+                    </div>
                   </div>
                 </div>
 

@@ -45,9 +45,14 @@ export async function hashPasswordClient(password: string): Promise<string> {
   }
 }
 
+// Cache flag so ensureAdminExists only runs once per app session
+let hasCheckedAdmin = false;
+
 export const firestoreService = {
-  // Ensure default Admin user exists in Firestore on first load
+  // Ensure default Admin user exists in Firestore on first load (runs only once per session)
   async ensureAdminExists(): Promise<void> {
+    if (hasCheckedAdmin) return;
+    hasCheckedAdmin = true;
     try {
       const adminDocRef = doc(db, USERS_COLLECTION, 'admin_root');
       const adminSnap = await getDoc(adminDocRef);
@@ -74,28 +79,39 @@ export const firestoreService = {
     }
   },
 
-  // Find user by username or email
+  // Fast find user by identifier (doc ID, username, or email in parallel)
   async findUserByIdentifier(identifier: string): Promise<FirestoreUserData | null> {
     const clean = identifier.trim().toLowerCase();
     try {
-      // 1. Check direct doc ID for admin or user
-      const docRef = doc(db, USERS_COLLECTION, clean === 'admin' ? 'admin_root' : clean);
-      const snap = await getDoc(docRef);
-      if (snap.exists()) {
-        return snap.data() as FirestoreUserData;
+      // 1. Quick direct doc ID checks (admin_root, usr_admin_root, or direct ID)
+      const directIds = clean === 'admin' 
+        ? ['admin_root', 'usr_admin_root'] 
+        : [clean, clean === 'usr_admin_root' ? 'admin_root' : clean];
+      
+      for (const id of directIds) {
+        try {
+          const docRef = doc(db, USERS_COLLECTION, id);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            return snap.data() as FirestoreUserData;
+          }
+        } catch {}
       }
 
-      // 2. Query by username
+      // 2. Parallel queries by username and email for fastest response
       const qUser = query(collection(db, USERS_COLLECTION), where('username', '==', clean), limit(1));
-      const userSnaps = await getDocs(qUser);
-      if (!userSnaps.empty) {
+      const qEmail = query(collection(db, USERS_COLLECTION), where('email', '==', clean), limit(1));
+
+      const [userSnaps, emailSnaps] = await Promise.all([
+        getDocs(qUser).catch(() => null),
+        getDocs(qEmail).catch(() => null),
+      ]);
+
+      if (userSnaps && !userSnaps.empty) {
         return userSnaps.docs[0].data() as FirestoreUserData;
       }
 
-      // 3. Query by email
-      const qEmail = query(collection(db, USERS_COLLECTION), where('email', '==', clean), limit(1));
-      const emailSnaps = await getDocs(qEmail);
-      if (!emailSnaps.empty) {
+      if (emailSnaps && !emailSnaps.empty) {
         return emailSnaps.docs[0].data() as FirestoreUserData;
       }
 
@@ -125,14 +141,39 @@ export const firestoreService = {
     });
   },
 
-  // Update password in Firestore
+  // Update password in Firestore (updates both admin_root and custom user doc if admin)
   async updateUserPassword(userId: string, newRawPassword: string): Promise<void> {
     const hashedPassword = await hashPasswordClient(newRawPassword);
-    const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, {
-      passwordHash: hashedPassword,
-      updated_at: new Date().toISOString(),
-    });
+    const targetIds = (userId === 'admin_root' || userId === 'usr_admin_root' || userId === 'admin')
+      ? ['admin_root', 'usr_admin_root']
+      : [userId];
+
+    for (const id of targetIds) {
+      try {
+        const userRef = doc(db, USERS_COLLECTION, id);
+        await updateDoc(userRef, {
+          passwordHash: hashedPassword,
+          updated_at: new Date().toISOString(),
+        });
+      } catch {
+        // If doc didn't exist with that specific ID, try setDoc if it was admin_root
+        if (id === 'admin_root') {
+          try {
+            await setDoc(doc(db, USERS_COLLECTION, 'admin_root'), {
+              id: 'admin_root',
+              username: 'admin',
+              name: 'Pentadbir KiraPuasaKu',
+              email: 'admin@kirapuasaku.app',
+              email_verified: true,
+              role: 'admin',
+              status: 'approved',
+              passwordHash: hashedPassword,
+              updated_at: new Date().toISOString(),
+            }, { merge: true });
+          } catch {}
+        }
+      }
+    }
   },
 
   // Update login time
@@ -147,67 +188,76 @@ export const firestoreService = {
     }
   },
 
-  // Verify password check
+  // Verify password check: compares hash strictly, with fallback if unhashed or master
   async verifyPassword(storedHash: string, inputRawPassword: string, role?: string): Promise<boolean> {
     const computed = await hashPasswordClient(inputRawPassword);
-    const isMasterAdmin = role === 'admin' && (
-      inputRawPassword === 'Admin@123456' ||
-      inputRawPassword === 'admin123' ||
-      inputRawPassword === 'admin' ||
-      inputRawPassword === 'Admin123'
-    );
-    // Support plain password backward compatibility or hashed comparison
-    return storedHash === computed || storedHash === inputRawPassword || isMasterAdmin;
+    if (storedHash === computed || storedHash === inputRawPassword) {
+      return true;
+    }
+    // Only allow fallback master admin if storedHash matches default Admin@123456 hash or empty
+    const defaultAdminHash = await hashPasswordClient('Admin@123456');
+    if (role === 'admin' && (storedHash === defaultAdminHash || !storedHash)) {
+      return (
+        inputRawPassword === 'Admin@123456' ||
+        inputRawPassword === 'admin123' ||
+        inputRawPassword === 'admin' ||
+        inputRawPassword === 'Admin123'
+      );
+    }
+    return false;
   },
 
-  // Get all users for admin dashboard
+  // Fast Parallel Get all users for admin dashboard
   async getAllUsers(): Promise<AdminUserItem[]> {
     try {
       await this.ensureAdminExists();
       const snaps = await getDocs(collection(db, USERS_COLLECTION));
-      const list: AdminUserItem[] = [];
+      
+      const list: AdminUserItem[] = await Promise.all(
+        snaps.docs.map(async (d) => {
+          const data = d.data() as FirestoreUserData;
+          let qadaRequired = 0;
+          let qadaCompleted = 0;
+          let recordsCount = 0;
 
-      for (const d of snaps.docs) {
-        const data = d.data() as FirestoreUserData;
-        // Fetch stats if available
-        let qadaRequired = 0;
-        let qadaCompleted = 0;
-        let recordsCount = 0;
+          try {
+            const [qadaSnap, recordsSnap] = await Promise.all([
+              getDoc(doc(db, QADA_COLLECTION, data.id)).catch(() => null),
+              getDoc(doc(db, RECORDS_COLLECTION, data.id)).catch(() => null),
+            ]);
 
-        try {
-          const qadaSnap = await getDoc(doc(db, QADA_COLLECTION, data.id));
-          if (qadaSnap.exists()) {
-            const qData = qadaSnap.data() as QadaRecord;
-            qadaRequired = qData.total_required || 0;
+            if (qadaSnap && qadaSnap.exists()) {
+              const qData = qadaSnap.data() as QadaRecord;
+              qadaRequired = qData.total_required || 0;
+            }
+
+            if (recordsSnap && recordsSnap.exists()) {
+              const recData = recordsSnap.data();
+              const items: DailyRecord[] = recData.items || [];
+              recordsCount = items.length;
+              qadaCompleted = items.reduce((sum, r) => sum + (Number(r.days) || 0), 0);
+            }
+          } catch {
+            // stats optional
           }
 
-          const recordsSnap = await getDoc(doc(db, RECORDS_COLLECTION, data.id));
-          if (recordsSnap.exists()) {
-            const recData = recordsSnap.data();
-            const items: DailyRecord[] = recData.items || [];
-            recordsCount = items.length;
-            qadaCompleted = items.reduce((sum, r) => sum + (Number(r.days) || 0), 0);
-          }
-        } catch {
-          // stats optional
-        }
-
-        list.push({
-          id: data.id,
-          username: data.username,
-          name: data.name || data.username,
-          email: data.email,
-          email_verified: !!data.email_verified,
-          role: data.role || 'user',
-          status: data.status || 'approved',
-          avatar: data.avatar,
-          created_at: data.created_at || new Date().toISOString(),
-          last_login: data.last_login || data.created_at,
-          qadaRequired,
-          qadaCompleted,
-          recordsCount,
-        });
-      }
+          return {
+            id: data.id,
+            username: data.username,
+            name: data.name || data.username,
+            email: data.email,
+            email_verified: !!data.email_verified,
+            role: data.role || 'user',
+            status: data.status || 'approved',
+            avatar: data.avatar,
+            created_at: data.created_at || new Date().toISOString(),
+            last_login: data.last_login || data.created_at,
+            qadaRequired,
+            qadaCompleted,
+            recordsCount,
+          };
+        })
+      );
 
       return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     } catch (err) {
@@ -304,11 +354,24 @@ export const firestoreService = {
   async saveDailyRecords(userId: string, records: DailyRecord[]): Promise<void> {
     try {
       await setDoc(doc(db, RECORDS_COLLECTION, userId), {
-        items: records,
+        items: records || [],
         updated_at: new Date().toISOString(),
       });
     } catch (err) {
       console.error('Firestore saveDailyRecords err:', err);
+    }
+  },
+
+  // Reset User Fasting Data in Firestore (Clears target & records)
+  async resetUserData(userId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, QADA_COLLECTION, userId));
+      await setDoc(doc(db, RECORDS_COLLECTION, userId), {
+        items: [],
+        updated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('Firestore resetUserData err:', err);
     }
   },
 
