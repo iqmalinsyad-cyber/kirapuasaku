@@ -3,7 +3,7 @@ import {
   Users, CheckCircle, ShieldCheck, Clock, Search, 
   Trash2, X, RefreshCw, KeyRound,
   RotateCcw, AlertTriangle, Copy, Check, Share2,
-  Mail, Send, CheckCircle2, XCircle, Info, ExternalLink
+  Mail, Send, CheckCircle2, XCircle, Info, ExternalLink, Sparkles
 } from 'lucide-react';
 import { AdminUserItem, Language } from '../types';
 import { getTranslation } from '../translations';
@@ -284,7 +284,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
         </div>
 
         {activeMainTab === 'smtp' ? (
-          /* SMTP GMAIL / NODEMAILER VIEW */
+          /* SMTP GMAIL / RESEND API / NODEMAILER VIEW */
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
             
             {/* Status Card */}
@@ -303,27 +303,27 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                     <Mail className="h-5 w-5" />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="text-sm font-bold text-stone-900 dark:text-white">
-                        Status Nodemailer (SMTP Gmail)
+                        Status Penghantaran Emel ({smtpStatus?.host?.includes('resend') ? 'Resend API (Cloudflare Pages)' : 'SMTP Gmail'})
                       </h3>
                       {smtpStatus?.configured ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
                           <CheckCircle2 className="h-3 w-3" />
-                          Aktif & Disambung
+                          Aktif & Bersedia
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/60 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
                           <Clock className="h-3 w-3" />
-                          Mod Auto-Aktif (Sedia Dikonfigurasi)
+                          Belum Dikonfigurasi
                         </span>
                       )}
                     </div>
                     
                     <p className="text-xs text-stone-600 dark:text-stone-300 mt-1 leading-relaxed">
                       {smtpStatus?.configured
-                        ? `Pelayan SMTP Gmail aktif melalui pengirim: ${smtpStatus.sender || 'SMTP_USER'}. Setiap pendaftaran akaun baharu akan dihantar emel pengesahan secara automatik.`
-                        : 'Pemboleh ubah SMTP_USER dan SMTP_PASS belum dikesan dalam persekitaran pelayan. Sistem kini berjalan dalam mod pendaftaran pantas di mana pengguna boleh terus log masuk dengan selamat.'}
+                        ? `Sistem emel aktif melalui: ${smtpStatus.sender || smtpStatus.host}. Setiap pendaftaran akaun baharu akan dihantar emel pengesahan secara automatik ke peti masuk pengguna.`
+                        : 'Pemboleh ubah RESEND_API_KEY (Cloudflare Pages) atau SMTP_USER/SMTP_PASS (Node.js) belum dikesan. Sila tetapkan kunci dalam persekitaran hos anda.'}
                     </p>
                   </div>
                 </div>
@@ -331,7 +331,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 <button
                   type="button"
                   onClick={fetchSMTPStatus}
-                  title="Semak Semula Status SMTP"
+                  title="Semak Semula Status Emel"
                   className="rounded-xl border border-stone-200 p-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer shrink-0"
                 >
                   <RefreshCw className="h-4 w-4" />
@@ -343,7 +343,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
             <div className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/80 shadow-2xs">
               <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-2 flex items-center gap-1.5">
                 <Send className="h-3.5 w-3.5 text-emerald-600" />
-                <span>Ujian Penghantaran Emel Nodemailer</span>
+                <span>Ujian Penghantaran Emel Pengesahan</span>
               </h4>
               <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
                 Masukkan alamat emel anda di bawah untuk menguji penghantaran template emel pengesahan pendaftaran akaun:
@@ -395,28 +395,32 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
               )}
             </div>
 
-            {/* Quick 3-Step Setup Guide & Cloudflare Notice */}
+            {/* Cloudflare Pages + Resend API Setup Guide */}
             <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/50 space-y-4">
               
-              {/* Cloudflare Pages vs Node.js Notice */}
-              <div className="rounded-xl border border-blue-200 bg-blue-50/70 dark:border-blue-900/50 dark:bg-blue-950/30 p-3.5 text-xs text-blue-950 dark:text-blue-200 space-y-2">
-                <div className="flex items-center gap-2 font-bold text-blue-900 dark:text-blue-100">
-                  <Info className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                  <span>Nota Penting Mengenai Cloudflare Pages vs Pelayan Node.js</span>
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/30 p-3.5 text-xs text-emerald-950 dark:text-emerald-200 space-y-2">
+                <div className="flex items-center gap-2 font-bold text-emerald-900 dark:text-emerald-100">
+                  <Sparkles className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>Kaedah Cloudflare Pages (Resend REST API) — Disyorkan</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-blue-800 dark:text-blue-300">
-                  <strong>Cloudflare Pages</strong> adalah platform pengehosan <em>Frontend Statik</em>. Fail <code className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1 rounded">server.ts</code> (Express + Nodemailer) memerlukan persekitaran <strong>Node.js</strong> (seperti Google Cloud Run, Render, Railway, atau VPS) untuk menghantar emel keluar secara langsung.
+                <p className="text-[11px] leading-relaxed text-emerald-800 dark:text-emerald-300">
+                  Sistem kini dilengkapi modul <strong>Cloudflare Pages Functions (<code className="font-mono bg-emerald-100 dark:bg-emerald-900/60 px-1 rounded">/functions/api</code>)</strong> yang menyokong <strong>Resend.com</strong> (3,000 emel percuma sebulan).
                 </p>
-                <div className="pt-1 border-t border-blue-200/80 dark:border-blue-900/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                  <span className="text-[10px] text-blue-700 dark:text-blue-400">
-                    💡 <strong>Tip Pentadbir:</strong> Jika anda mengehos di Cloudflare Pages, anda boleh mengesahkan emel pengguna baru dengan 1-klik di tab <strong>"Senarai Pengguna"</strong> (tekan butang hijau <strong>"Sahkan Emel"</strong>).
-                  </span>
+                <div className="pt-2 border-t border-emerald-200/80 dark:border-emerald-900/50 space-y-1.5 text-[11px]">
+                  <p><strong>Langkah Konfigurasi di Cloudflare Dashboard:</strong></p>
+                  <ol className="list-decimal list-inside space-y-1 text-stone-700 dark:text-stone-300">
+                    <li>Daftar akaun percuma di <strong className="text-emerald-700 dark:text-emerald-400">resend.com</strong> & jana API Key (bermula <code className="font-mono">re_...</code>).</li>
+                    <li>Di Cloudflare Pages, buka <strong>Settings &gt; Variables and secrets</strong>.</li>
+                    <li>Tambah pembolehubah: <code className="font-mono font-bold bg-white dark:bg-stone-800 px-1 rounded">RESEND_API_KEY</code> (Pilih jenis <strong>Secret</strong>).</li>
+                    <li>(Pilihan) Tambah <code className="font-mono font-bold bg-white dark:bg-stone-800 px-1 rounded">RESEND_FROM_EMAIL</code> (cth: <code className="font-mono">onboarding@resend.dev</code> atau domain anda).</li>
+                    <li>Lakukan <strong>Deploy Semula (Redeploy)</strong> di Cloudflare Pages selepas menyimpan variable tersebut.</li>
+                  </ol>
                 </div>
               </div>
 
               <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-1 flex items-center gap-1.5">
                 <Info className="h-3.5 w-3.5 text-stone-500" />
-                <span>Panduan 3 Langkah Mengaktifkan SMTP Gmail (Node.js / Cloud Run)</span>
+                <span>Alternatif: Panduan SMTP Gmail (Untuk Pelayan Node.js / Cloud Run)</span>
               </h4>
 
               <div className="space-y-2.5">
@@ -443,7 +447,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">3</span>
                   <div>
-                    <p className="text-xs font-bold text-stone-900 dark:text-white">Masukkan Nilai dalam Pelayan Node.js / .env</p>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Tetapkan SMTP_USER & SMTP_PASS dalam .env</p>
                     <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
                       Tetapkan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_USER=emelanda@gmail.com</code> dan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_PASS=abcdefghijklmnop</code> di dalam tetapan pelayan Node.js anda.
                     </p>

@@ -1038,22 +1038,24 @@ async function startServer() {
     });
   });
 
-  // 9.1 Get SMTP Configuration Status (Admin only)
+  // 9.1 Get SMTP / Resend Configuration Status (Admin only)
   app.get('/api/admin/smtp-status', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
     const configured = isSMTPConfigured();
+    const hasResend = Boolean(process.env.RESEND_API_KEY);
     const smtpUser = process.env.SMTP_USER || '';
     const maskedUser = smtpUser ? smtpUser.replace(/^(.{2})(.*)(@.*)$/, '$1***$3') : '';
 
     return res.json({
       configured,
-      host: process.env.SMTP_HOST || 'smtp.gmail.com',
-      port: Number(process.env.SMTP_PORT) || 465,
-      sender: maskedUser || null,
+      provider: hasResend ? 'resend' : (smtpUser ? 'smtp' : 'none'),
+      sender: hasResend ? (process.env.RESEND_FROM_EMAIL || 'Resend API (Cloudflare Pages / Node)') : (maskedUser || null),
+      host: hasResend ? 'api.resend.com' : (process.env.SMTP_HOST || 'smtp.gmail.com'),
+      port: hasResend ? 443 : (Number(process.env.SMTP_PORT) || 465),
       appUrl: process.env.APP_URL || 'http://localhost:3000',
     });
   });
 
-  // 9.2 Test SMTP Gmail Connection and Send Test Email (Admin only)
+  // 9.2 Test SMTP Gmail / Resend Connection and Send Test Email (Admin only)
   app.post('/api/admin/smtp-test', verifyToken, verifyAdmin, async (req: AuthenticatedRequest, res: Response) => {
     const { testEmail } = req.body;
     const recipient = testEmail ? String(testEmail).trim() : req.user!.email;
@@ -1064,7 +1066,7 @@ async function startServer() {
 
     if (!isSMTPConfigured()) {
       return res.status(400).json({
-        error: 'SMTP belum dikonfigurasi. Sila tetapkan pemboleh ubah SMTP_USER dan SMTP_PASS dalam .env terlebih dahulu.',
+        error: 'Sistem emel belum dikonfigurasi. Sila tetapkan pemboleh ubah RESEND_API_KEY atau SMTP_USER & SMTP_PASS dalam persekitaran terlebih dahulu.',
         configured: false,
       });
     }
@@ -1081,7 +1083,7 @@ async function startServer() {
 
     return res.json({
       success: true,
-      message: `Emel ujian pengesahan Nodemailer telah berjaya dihantar ke ${recipient}!`,
+      message: `Emel ujian pengesahan telah berjaya dihantar ke ${recipient}!`,
       messageId: result.messageId,
     });
   });
