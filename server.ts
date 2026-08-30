@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
+import { sendVerificationEmail, testSMTPConnection, isSMTPConfigured } from './mailer';
 
 // Type definitions for Server Database
 export type UserRole = 'admin' | 'user';
@@ -427,17 +428,20 @@ async function startServer() {
     const displayName = (name && typeof name === 'string' && name.trim()) ? name.trim() : cleanUsername;
     const defaultAvatar = avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`;
 
+    const smtpActive = isSMTPConfigured();
+    const isAutoVerified = !smtpActive; // If SMTP not configured, auto-activate so user is never locked out
+
     const newUser: UserRecord = {
       id: userId,
       username: cleanUsername,
       name: displayName,
       email: cleanEmail,
-      email_verified: true, // Active and verified by default for multi-device ease
+      email_verified: isAutoVerified, // Auto-verified if no SMTP, or pending verification if SMTP is active
       verification_token: verificationToken,
       salt,
       passwordHash,
       role: 'user',
-      status: 'approved', // Auto-approved in database!
+      status: 'approved',
       avatar: defaultAvatar,
       created_at: new Date().toISOString(),
     };
@@ -482,13 +486,35 @@ async function startServer() {
 
     saveDatabase();
 
+    // Trigger Nodemailer asynchronous dispatch if SMTP configured
+    let emailSent = false;
+    let emailError: string | null = null;
+    if (smtpActive) {
+      sendVerificationEmail(cleanEmail, cleanUsername, verificationToken)
+        .then((mailRes) => {
+          if (mailRes.success) {
+            console.log(`[SMTP Nodemailer] Verification email sent to ${cleanEmail}`);
+          } else {
+            console.warn(`[SMTP Nodemailer] Failed to send email: ${mailRes.error}`);
+          }
+        })
+        .catch((e) => {
+          console.error('[SMTP Nodemailer] Unexpected error:', e);
+        });
+    }
+
     return res.status(201).json({
       success: true,
-      message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
+      message: smtpActive 
+        ? `Pendaftaran berjaya! Emel pengesahan telah dihantar ke ${cleanEmail}.` 
+        : 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
       token,
       expiresAt,
       email: cleanEmail,
       username: cleanUsername,
+      requiresEmailVerification: smtpActive && !newUser.email_verified,
+      verificationToken: newUser.verification_token,
+      smtpConfigured: smtpActive,
       user: {
         id: newUser.id,
         username: newUser.username,
@@ -539,8 +565,8 @@ async function startServer() {
     });
   });
 
-  // 1.2 Resend Email Verification Link
-  app.post('/api/auth/resend-verification', (req: Request, res: Response) => {
+  // 1.2 Resend Email Verification Link (via Nodemailer if active)
+  app.post('/api/auth/resend-verification', async (req: Request, res: Response) => {
     const { email, username } = req.body;
 
     let user: UserRecord | undefined;
@@ -566,14 +592,21 @@ async function startServer() {
     user.verification_token = 'ver_' + generateToken();
     saveDatabase();
 
+    // Trigger Nodemailer
+    if (isSMTPConfigured()) {
+      await sendVerificationEmail(user.email, user.username, user.verification_token);
+    }
+
     return res.json({
       success: true,
       message: `Pautan pengesahan baharu telah dihantar ke alamat emel ${user.email}.`,
       email: user.email,
       username: user.username,
       verificationToken: user.verification_token,
+      smtpConfigured: isSMTPConfigured(),
     });
   });
+
 
   // 2. Login -> SHA-256 + Salt Verification, 2h Session Token, Rate Limiting (5 failed -> 15 min lock), Email Verified Check
   app.post('/api/auth/login', (req: Request, res: Response) => {
@@ -971,6 +1004,55 @@ async function startServer() {
       message: `Pengguna "${targetUser.name}" berjaya dipadam.`
     });
   });
+
+  // 9.1 Get SMTP Configuration Status (Admin only)
+  app.get('/api/admin/smtp-status', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const configured = isSMTPConfigured();
+    const smtpUser = process.env.SMTP_USER || '';
+    const maskedUser = smtpUser ? smtpUser.replace(/^(.{2})(.*)(@.*)$/, '$1***$3') : '';
+
+    return res.json({
+      configured,
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: Number(process.env.SMTP_PORT) || 465,
+      sender: maskedUser || null,
+      appUrl: process.env.APP_URL || 'http://localhost:3000',
+    });
+  });
+
+  // 9.2 Test SMTP Gmail Connection and Send Test Email (Admin only)
+  app.post('/api/admin/smtp-test', verifyToken, verifyAdmin, async (req: AuthenticatedRequest, res: Response) => {
+    const { testEmail } = req.body;
+    const recipient = testEmail ? String(testEmail).trim() : req.user!.email;
+
+    if (!recipient) {
+      return res.status(400).json({ error: 'Sila masukkan alamat emel penerima untuk ujian.' });
+    }
+
+    if (!isSMTPConfigured()) {
+      return res.status(400).json({
+        error: 'SMTP belum dikonfigurasi. Sila tetapkan pemboleh ubah SMTP_USER dan SMTP_PASS dalam .env terlebih dahulu.',
+        configured: false,
+      });
+    }
+
+    const testToken = 'test_' + generateToken();
+    const result = await sendVerificationEmail(recipient, req.user!.name || 'Admin', testToken);
+
+    if (!result.success) {
+      return res.status(500).json({
+        error: `Gagal menghantar emel ujian: ${result.error}`,
+        configured: true,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `Emel ujian pengesahan Nodemailer telah berjaya dihantar ke ${recipient}!`,
+      messageId: result.messageId,
+    });
+  });
+
 
   // ==========================================
   // USER QADA DATA API (All Protected by verifyToken)

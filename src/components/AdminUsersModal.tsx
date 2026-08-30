@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, CheckCircle, ShieldCheck, Clock, Search, 
   Trash2, X, RefreshCw, KeyRound,
-  RotateCcw, AlertTriangle, Copy, Check, Share2
+  RotateCcw, AlertTriangle, Copy, Check, Share2,
+  Mail, Send, CheckCircle2, XCircle, Info, ExternalLink
 } from 'lucide-react';
 import { AdminUserItem, Language } from '../types';
 import { getTranslation } from '../translations';
@@ -25,10 +26,23 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 }) => {
   const t = getTranslation(language);
 
+  const [activeMainTab, setActiveMainTab] = useState<'users' | 'smtp'>('users');
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // SMTP Settings & Test State
+  const [smtpStatus, setSmtpStatus] = useState<{
+    configured: boolean;
+    host: string;
+    port: number;
+    sender: string | null;
+    appUrl: string;
+  } | null>(null);
+  const [testEmailInput, setTestEmailInput] = useState<string>('');
+  const [isTestingSMTP, setIsTestingSMTP] = useState<boolean>(false);
+  const [testSMTPResult, setTestSMTPResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Confirmation & Action Modals State
   const [userToDelete, setUserToDelete] = useState<AdminUserItem | null>(null);
@@ -55,14 +69,53 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
     }
   };
 
+  const fetchSMTPStatus = async () => {
+    try {
+      const res = await adminApi.getSMTPStatus();
+      if (res.data) {
+        setSmtpStatus(res.data);
+      }
+    } catch (e) {
+      console.warn('Could not fetch SMTP status', e);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) {
       fetchUsers();
+      fetchSMTPStatus();
       setUserToDelete(null);
       setUserToReset(null);
       setResetResult(null);
+      setTestSMTPResult(null);
     }
   }, [isOpen]);
+
+  const handleTestSMTP = async () => {
+    if (!testEmailInput || !testEmailInput.includes('@')) {
+      onShowToast('Sila masukkan alamat emel yang sah untuk ujian.', 'error');
+      return;
+    }
+    setIsTestingSMTP(true);
+    setTestSMTPResult(null);
+    try {
+      const res = await adminApi.testSMTP(testEmailInput.trim());
+      if (res.data?.success) {
+        setTestSMTPResult({ success: true, message: res.data.message });
+        onShowToast(res.data.message, 'success');
+      } else {
+        const errMsg = res.error || 'Ujian SMTP gagal.';
+        setTestSMTPResult({ success: false, message: errMsg });
+        onShowToast(errMsg, 'error');
+      }
+    } catch (e: any) {
+      const errMsg = e.message || 'Ralat semasa menjalankan ujian SMTP.';
+      setTestSMTPResult({ success: false, message: errMsg });
+      onShowToast(errMsg, 'error');
+    } finally {
+      setIsTestingSMTP(false);
+    }
+  };
 
   const handleUpdateStatus = async (userId: string, status: 'approved' | 'rejected') => {
     try {
@@ -186,78 +239,271 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-white transition cursor-pointer"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
-        {/* Filter Bar & Search */}
-        <div className="border-b border-stone-200 p-3.5 dark:border-stone-800 bg-white dark:bg-stone-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
-          
-          {/* Status Tabs */}
-          <div className="flex rounded-xl bg-stone-100 p-1 dark:bg-stone-800 w-full sm:w-auto overflow-x-auto">
-            <button
-              onClick={() => setFilterStatus('all')}
-              className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
-                filterStatus === 'all'
-                  ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-white'
-                  : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
-              }`}
-            >
-              {t.tabAllUsers} ({users.length})
-            </button>
-            <button
-              onClick={() => setFilterStatus('pending')}
-              className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
-                filterStatus === 'pending'
-                  ? 'bg-amber-600 text-white shadow-2xs'
-                  : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
-              }`}
-            >
-              {t.tabPendingUsers} ({unverifiedEmailCount})
-            </button>
-            <button
-              onClick={() => setFilterStatus('approved')}
-              className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
-                filterStatus === 'approved'
-                  ? 'bg-emerald-700 text-white shadow-2xs'
-                  : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
-              }`}
-            >
-              {t.tabApprovedUsers} ({approvedCount})
-            </button>
-          </div>
-
-          {/* Search input & Refresh */}
-          <div className="flex items-center gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-56">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-400" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={language === 'ms' ? 'Cari pengguna...' : 'Search users...'}
-                className="w-full rounded-xl border border-stone-200 bg-stone-50/60 pl-8 pr-3 py-1 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
-              />
+          <div className="flex items-center gap-2">
+            {/* Top Navigation between Users & SMTP */}
+            <div className="flex rounded-xl bg-stone-200/80 p-0.5 dark:bg-stone-800">
+              <button
+                type="button"
+                onClick={() => setActiveMainTab('users')}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                  activeMainTab === 'users'
+                    ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-white'
+                    : 'text-stone-600 hover:text-stone-900 dark:text-stone-400'
+                }`}
+              >
+                <Users className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Pengguna</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMainTab('smtp');
+                  fetchSMTPStatus();
+                }}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                  activeMainTab === 'smtp'
+                    ? 'bg-emerald-700 text-white shadow-2xs'
+                    : 'text-stone-600 hover:text-stone-900 dark:text-stone-400'
+                }`}
+              >
+                <Mail className="h-3.5 w-3.5" />
+                <span>SMTP Gmail</span>
+                {smtpStatus?.configured && (
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                )}
+              </button>
             </div>
 
             <button
-              onClick={fetchUsers}
-              disabled={isLoading}
-              title="Muat Semula"
-              className="rounded-xl border border-stone-200 p-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-stone-400 hover:bg-stone-200 hover:text-stone-700 dark:hover:bg-stone-800 dark:hover:text-white transition cursor-pointer ml-1"
             >
-              <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+              <X className="h-4 w-4" />
             </button>
           </div>
-
         </div>
 
-        {/* User List Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-2.5">
+        {activeMainTab === 'smtp' ? (
+          /* SMTP GMAIL / NODEMAILER VIEW */
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            
+            {/* Status Card */}
+            <div className={`rounded-2xl border p-4 sm:p-5 ${
+              smtpStatus?.configured 
+                ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-800 dark:bg-emerald-950/30' 
+                : 'border-amber-200 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/30'
+            }`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                    smtpStatus?.configured 
+                      ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/20' 
+                      : 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                  }`}>
+                    <Mail className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-stone-900 dark:text-white">
+                        Status Nodemailer (SMTP Gmail)
+                      </h3>
+                      {smtpStatus?.configured ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/60 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                          <CheckCircle2 className="h-3 w-3" />
+                          Aktif & Disambung
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 dark:bg-amber-900/60 px-2.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                          <Clock className="h-3 w-3" />
+                          Mod Auto-Aktif (Sedia Dikonfigurasi)
+                        </span>
+                      )}
+                    </div>
+                    
+                    <p className="text-xs text-stone-600 dark:text-stone-300 mt-1 leading-relaxed">
+                      {smtpStatus?.configured
+                        ? `Pelayan SMTP Gmail aktif melalui pengirim: ${smtpStatus.sender || 'SMTP_USER'}. Setiap pendaftaran akaun baharu akan dihantar emel pengesahan secara automatik.`
+                        : 'Pemboleh ubah SMTP_USER dan SMTP_PASS belum dikesan dalam persekitaran pelayan. Sistem kini berjalan dalam mod pendaftaran pantas di mana pengguna boleh terus log masuk dengan selamat.'}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchSMTPStatus}
+                  title="Semak Semula Status SMTP"
+                  className="rounded-xl border border-stone-200 p-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer shrink-0"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Test Email Section */}
+            <div className="rounded-2xl border border-stone-200 bg-white p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/80 shadow-2xs">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-2 flex items-center gap-1.5">
+                <Send className="h-3.5 w-3.5 text-emerald-600" />
+                <span>Ujian Penghantaran Emel Nodemailer</span>
+              </h4>
+              <p className="text-xs text-stone-500 dark:text-stone-400 mb-3">
+                Masukkan alamat emel anda di bawah untuk menguji penghantaran template emel pengesahan pendaftaran akaun:
+              </p>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                <input
+                  type="email"
+                  value={testEmailInput}
+                  onChange={(e) => setTestEmailInput(e.target.value)}
+                  placeholder="contoh: emelanda@gmail.com"
+                  className="flex-1 rounded-xl border border-stone-200 bg-stone-50 px-3.5 py-2 text-xs font-medium text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                />
+                <button
+                  type="button"
+                  disabled={isTestingSMTP}
+                  onClick={handleTestSMTP}
+                  className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-4 py-2 text-xs font-bold text-white shadow-2xs transition cursor-pointer disabled:opacity-50"
+                >
+                  {isTestingSMTP ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Sedang Menghantar...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="h-3.5 w-3.5" />
+                      <span>Hantar Emel Ujian</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {testSMTPResult && (
+                <div className={`mt-3 rounded-xl border p-3 text-xs ${
+                  testSMTPResult.success
+                    ? 'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200'
+                    : 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-200'
+                }`}>
+                  <div className="flex items-start gap-2">
+                    {testSMTPResult.success ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                    )}
+                    <span className="leading-relaxed">{testSMTPResult.message}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Quick 3-Step Setup Guide */}
+            <div className="rounded-2xl border border-stone-200 bg-stone-50/80 p-4 sm:p-5 dark:border-stone-800 dark:bg-stone-900/50">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-stone-800 dark:text-stone-200 mb-3 flex items-center gap-1.5">
+                <Info className="h-3.5 w-3.5 text-stone-500" />
+                <span>Panduan 3 Langkah Mengaktifkan SMTP Gmail</span>
+              </h4>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">1</span>
+                  <div>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Aktifkan 2-Step Verification</p>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                      Buka akaun Google anda dan pastikan Pengesahan 2 Langkah (2FA) dihidupkan.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">2</span>
+                  <div>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Jana Google App Password (16-Digit)</p>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                      Layari <strong className="font-mono text-emerald-700 dark:text-emerald-400">myaccount.google.com/apppasswords</strong>, cipta nama aplikasi (cth: "KiraPuasaKu") dan salin 16 aksara kata laluan yang dijana.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3 rounded-xl bg-white dark:bg-stone-800/80 p-3 border border-stone-200 dark:border-stone-700/60">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-[11px] font-bold text-white">3</span>
+                  <div>
+                    <p className="text-xs font-bold text-stone-900 dark:text-white">Masukkan Nilai dalam Settings / .env</p>
+                    <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5">
+                      Tetapkan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_USER=emelanda@gmail.com</code> dan <code className="font-mono text-xs font-bold bg-stone-100 dark:bg-stone-900 px-1 rounded">SMTP_PASS=abcdefghijklmnop</code>.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        ) : (
+          /* USERS LIST VIEW */
+          <>
+            {/* Filter Bar & Search */}
+            <div className="border-b border-stone-200 p-3.5 dark:border-stone-800 bg-white dark:bg-stone-900 flex flex-col sm:flex-row items-center justify-between gap-2.5">
+              
+              {/* Status Tabs */}
+              <div className="flex rounded-xl bg-stone-100 p-1 dark:bg-stone-800 w-full sm:w-auto overflow-x-auto">
+                <button
+                  onClick={() => setFilterStatus('all')}
+                  className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
+                    filterStatus === 'all'
+                      ? 'bg-white text-stone-900 shadow-2xs dark:bg-stone-700 dark:text-white'
+                      : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
+                  }`}
+                >
+                  {t.tabAllUsers} ({users.length})
+                </button>
+                <button
+                  onClick={() => setFilterStatus('pending')}
+                  className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
+                    filterStatus === 'pending'
+                      ? 'bg-amber-600 text-white shadow-2xs'
+                      : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
+                  }`}
+                >
+                  {t.tabPendingUsers} ({unverifiedEmailCount})
+                </button>
+                <button
+                  onClick={() => setFilterStatus('approved')}
+                  className={`flex-1 sm:flex-initial rounded-lg px-3 py-1 text-xs font-semibold transition cursor-pointer shrink-0 ${
+                    filterStatus === 'approved'
+                      ? 'bg-emerald-700 text-white shadow-2xs'
+                      : 'text-stone-500 hover:text-stone-900 dark:text-stone-400'
+                  }`}
+                >
+                  {t.tabApprovedUsers} ({approvedCount})
+                </button>
+              </div>
+
+              {/* Search input & Refresh */}
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-56">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-stone-400" />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={language === 'ms' ? 'Cari pengguna...' : 'Search users...'}
+                    className="w-full rounded-xl border border-stone-200 bg-stone-50/60 pl-8 pr-3 py-1 text-xs font-semibold text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white"
+                  />
+                </div>
+
+                <button
+                  onClick={fetchUsers}
+                  disabled={isLoading}
+                  title="Muat Semula"
+                  className="rounded-xl border border-stone-200 p-1.5 text-stone-600 hover:bg-stone-100 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+            </div>
+
+            {/* User List Body */}
+            <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-2.5">
+
           
           {/* Reset Result Notification Card */}
           {resetResult && (
@@ -464,8 +710,11 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
             ))
           )}
         </div>
+      </>
+    )}
 
-        {/* Footer */}
+    {/* Footer */}
+
         <div className="border-t border-stone-200 p-3.5 dark:border-stone-800 bg-stone-50 dark:bg-stone-950/50 flex justify-end">
           <button
             onClick={onClose}
