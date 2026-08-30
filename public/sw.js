@@ -1,10 +1,5 @@
 // KiraPuasaKu Service Worker - Resilient PWA Offline Support
-const CACHE_NAME = 'kirapuasaku-v2';
-const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.webmanifest'
-];
+const CACHE_VERSION = 'kirapuasaku-v3';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -15,7 +10,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((name) => {
-          if (name !== CACHE_NAME) {
+          if (name !== CACHE_VERSION) {
             return caches.delete(name);
           }
         })
@@ -25,44 +20,45 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  const url = event.request.url;
+  const url = new URL(event.request.url);
 
-  // Never intercept non-GET, API routes, Vite internal modules, or dev server scripts
+  // Never intercept non-GET, API routes, Vite internal modules, dev scripts, or hot updates
   if (
     event.request.method !== 'GET' ||
-    url.includes('/api/') ||
-    url.includes('/@') ||
-    url.includes('/src/') ||
-    url.includes('node_modules') ||
-    url.includes('vite') ||
-    url.includes('hot-update')
+    url.pathname.startsWith('/api/') ||
+    url.pathname.includes('/@') ||
+    url.pathname.includes('/src/') ||
+    url.pathname.includes('node_modules') ||
+    url.pathname.includes('vite') ||
+    url.pathname.includes('hot-update')
   ) {
     return;
   }
 
-  // Network-first strategy for smooth navigation and preventing blank screen
+  // For HTML documents and main navigation, always fetch fresh from network
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    event.respondWith(
+      fetch(event.request)
+        .catch(() => caches.match('/index.html').then((res) => res || fetch(event.request)))
+    );
+    return;
+  }
+
+  // For static assets (JS, CSS, images, icons, fonts): Network-first with cache fallback
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+        if (networkResponse && networkResponse.status === 200) {
           const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
+          caches.open(CACHE_VERSION).then((cache) => {
             cache.put(event.request, responseToCache);
           }).catch(() => {});
         }
         return networkResponse;
       })
       .catch(() => {
-        // Fallback to cache if network is completely offline
-        return caches.match(event.request).then((cachedResponse) => {
-          if (cachedResponse) {
-            return cachedResponse;
-          }
-          if (event.request.mode === 'navigate') {
-            return caches.match('/index.html');
-          }
-          return new Response('Network offline', { status: 503, statusText: 'Offline' });
-        });
+        return caches.match(event.request);
       })
   );
 });
+
