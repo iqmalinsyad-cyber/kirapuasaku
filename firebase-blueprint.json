@@ -1,0 +1,60 @@
+{
+  "entities": {
+    "User": {
+      "collection": "users",
+      "fields": {
+        "id": { "type": "string", "description": "Unique user ID" },
+        "username": { "type": "string", "description": "Lowercase username" },
+        "name": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "description": "Email address" },
+        "email_verified": { "type": "boolean", "description": "Whether email is verified" },
+        "role": { "type": "string", "description": "admin or user" },
+        "status": { "type": "string", "description": "pending, approved, or rejected" },
+        "avatar": { "type": "string", "description": "Avatar image URL" },
+        "passwordHash": { "type": "string", "description": "Hashed password or token credential" },
+        "created_at": { "type": "string", "description": "ISO timestamp created" },
+        "last_login": { "type": "string", "description": "ISO timestamp last login" }
+      }
+    },
+    "QadaTarget": {
+      "collection": "qada_records",
+      "fields": {
+        "id": { "type": "string", "description": "Document ID" },
+        "user_id": { "type": "string", "description": "Owner user ID" },
+        "total_required": { "type": "number", "description": "Total missed fasts count" },
+        "total_completed": { "type": "number", "description": "Total completed fasts count" },
+        "remaining": { "type": "number", "description": "Remaining count" },
+        "year": { "type": "string", "description": "Target year" },
+        "notes": { "type": "string", "description": "Additional notes" },
+        "created_at": { "type": "string", "description": "ISO timestamp created" },
+        "updated_at": { "type": "string", "description": "ISO timestamp updated" }
+      }
+    },
+    "DailyRecord": {
+      "collection": "daily_records",
+      "fields": {
+        "id": { "type": "string", "description": "Document ID" },
+        "user_id": { "type": "string", "description": "Owner user ID" },
+        "qada_record_id": { "type": "string", "description": "Associated qada record ID" },
+        "date": { "type": "string", "description": "Date YYYY-MM-DD" },
+        "days": { "type": "number", "description": "Days completed" },
+        "notes": { "type": "string", "description": "Notes" },
+        "created_at": { "type": "string", "description": "ISO timestamp created" },
+        "updated_at": { "type": "string", "description": "ISO timestamp updated" }
+      }
+    },
+    "UserSettings": {
+      "collection": "user_settings",
+      "fields": {
+        "id": { "type": "string", "description": "Settings ID" },
+        "user_id": { "type": "string", "description": "User ID" },
+        "theme": { "type": "string", "description": "light, dark, or system" },
+        "language": { "type": "string", "description": "ms or en" },
+        "userName": { "type": "string", "description": "User display name" },
+        "reminder": { "type": "object", "description": "Reminder configuration" },
+        "googleSheetWebhookUrl": { "type": "string", "description": "Webhook URL" },
+        "lastGoogleSheetSync": { "type": "string", "description": "Last sync timestamp" }
+      }
+    }
+  }
+}

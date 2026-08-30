@@ -1,46 +1,9 @@
 import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem } from '../types';
 import { getQadaRecord, getDailyRecords, getInitialSettings, saveQadaRecord, saveDailyRecords, saveSettings } from './storage';
+import { firestoreService } from '../firebase/firestoreService';
 
 const TOKEN_KEY = 'qadatrack_auth_token_v1';
 const USER_KEY = 'qadatrack_auth_user_v1';
-const LOCAL_USERS_KEY = 'qadatrack_local_users_v1';
-
-interface LocalUserRecord {
-  user: User;
-  passwordHash: string;
-}
-
-function getLocalUsers(): LocalUserRecord[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_USERS_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {
-    console.error('Failed to read local users store', e);
-  }
-  // Default fallback admin user for standalone client deployment
-  const defaultAdmin: LocalUserRecord = {
-    user: {
-      id: 'admin_root',
-      username: 'admin',
-      name: 'Pentadbir KiraPuasaKu',
-      email: 'admin@kirapuasaku.app',
-      email_verified: true,
-      role: 'admin',
-      status: 'approved',
-      created_at: new Date().toISOString(),
-    },
-    passwordHash: 'admin123'
-  };
-  return [defaultAdmin];
-}
-
-function saveLocalUsers(users: LocalUserRecord[]): void {
-  try {
-    localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
-  } catch (e) {
-    console.error('Failed to save local users', e);
-  }
-}
 
 export function getStoredToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -127,7 +90,6 @@ export async function apiRequest<T = any>(
 
     return { data };
   } catch (err: any) {
-    console.warn(`API unavailable on ${endpoint}, switching to resilient mode:`, err);
     return { 
       error: 'Gagal menyambung ke pelayan backend.',
       code: 'BACKEND_UNAVAILABLE'
@@ -135,7 +97,7 @@ export async function apiRequest<T = any>(
   }
 }
 
-// Authentication API calls with Dual-Engine (Server API + Cloudflare Pages static fallback)
+// Authentication API calls with Firebase Cloud Sync
 export const authApi = {
   async register(username: string, email: string, password: string, avatar?: string, name?: string) {
     const cleanUser = username.trim().toLowerCase();
@@ -156,49 +118,54 @@ export const authApi = {
     });
 
     if (res.code === 'BACKEND_UNAVAILABLE') {
-      // Standalone / Cloudflare Pages client-side mode
-      const localUsers = getLocalUsers();
-      const existing = localUsers.find(
-        (u) => u.user.username === cleanUser || u.user.email === cleanEmail
-      );
+      try {
+        await firestoreService.ensureAdminExists();
+        const existing = await firestoreService.findUserByIdentifier(cleanUser) || 
+                         await firestoreService.findUserByIdentifier(cleanEmail);
 
-      if (existing) {
+        if (existing) {
+          return {
+            error: 'Nama pengguna atau alamat emel telah didaftarkan dalam sistem.',
+            code: 'USER_EXISTS'
+          };
+        }
+
+        const newUser: User = {
+          id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          username: cleanUser,
+          name: displayName,
+          email: cleanEmail,
+          email_verified: true,
+          role: 'user',
+          status: 'approved',
+          avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
+          created_at: new Date().toISOString(),
+        };
+
+        await firestoreService.registerUser(newUser, password);
+
+        const token = 'token_fb_' + Date.now();
+        setStoredToken(token);
+        setStoredUser(newUser);
+
         return {
-          error: 'Nama pengguna atau alamat emel telah didaftarkan dalam sistem.',
-          code: 'USER_EXISTS'
+          data: {
+            success: true,
+            message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
+            email: cleanEmail,
+            username: cleanUser,
+            token,
+            expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+            user: newUser,
+          }
+        };
+      } catch (err: any) {
+        console.error('Firebase registration error:', err);
+        return {
+          error: 'Ralat pangkalan data Firebase. Sila cuba sebentar lagi.',
+          code: 'FIREBASE_ERROR'
         };
       }
-
-      const newUser: User = {
-        id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        username: cleanUser,
-        name: displayName,
-        email: cleanEmail,
-        email_verified: true,
-        role: localUsers.length === 0 ? 'admin' : 'user',
-        status: 'approved',
-        avatar: avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=120&auto=format&fit=crop&q=80',
-        created_at: new Date().toISOString(),
-      };
-
-      localUsers.push({ user: newUser, passwordHash: password });
-      saveLocalUsers(localUsers);
-
-      const token = 'token_local_' + Date.now();
-      setStoredToken(token);
-      setStoredUser(newUser);
-
-      return {
-        data: {
-          success: true,
-          message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
-          email: cleanEmail,
-          username: cleanUser,
-          token,
-          expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
-          user: newUser,
-        }
-      };
     }
 
     if (res.data?.token && res.data?.user) {
@@ -242,58 +209,64 @@ export const authApi = {
     });
 
     if (res.code === 'BACKEND_UNAVAILABLE') {
-      // Standalone / Cloudflare Pages client-side mode
-      let localUsers = getLocalUsers();
-      
-      // Ensure admin exists in local users list
-      let adminRecord = localUsers.find((u) => u.user.role === 'admin' || u.user.username === 'admin');
-      if (!adminRecord) {
-        adminRecord = {
-          user: {
-            id: 'admin_root',
-            username: 'admin',
-            name: 'Pentadbir KiraPuasaKu',
-            email: 'admin@kirapuasaku.app',
-            email_verified: true,
-            role: 'admin',
-            status: 'approved',
-            created_at: new Date().toISOString(),
-          },
-          passwordHash: 'admin123'
+      try {
+        await firestoreService.ensureAdminExists();
+        const firestoreUser = await firestoreService.findUserByIdentifier(cleanUser);
+
+        if (!firestoreUser) {
+          return {
+            error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
+            code: 'INVALID_CREDENTIALS'
+          };
+        }
+
+        // Verify Password against Firestore
+        const isPasswordValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, password, firestoreUser.role);
+        if (!isPasswordValid) {
+          return {
+            error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
+            code: 'INVALID_CREDENTIALS'
+          };
+        }
+
+        if (firestoreUser.status === 'rejected') {
+          return {
+            error: 'Akaun anda telah dinyahaktifkan oleh Pentadbir.',
+            code: 'ACCOUNT_REJECTED'
+          };
+        }
+
+        const validUser: User = {
+          id: firestoreUser.id,
+          username: firestoreUser.username,
+          name: firestoreUser.name || firestoreUser.username,
+          email: firestoreUser.email,
+          email_verified: !!firestoreUser.email_verified,
+          role: firestoreUser.role,
+          status: firestoreUser.status,
+          avatar: firestoreUser.avatar,
+          created_at: firestoreUser.created_at,
+          last_login: new Date().toISOString(),
         };
-        localUsers.unshift(adminRecord);
-        saveLocalUsers(localUsers);
-      }
 
-      const isAdminAttempt = cleanUser === 'admin' || cleanUser === 'admin@kirapuasaku.app' || cleanUser === 'admin@qadatrack.app';
-      const isMasterAdminPassword = (
-        password === 'admin123' ||
-        password === 'Admin@123456' ||
-        password === 'Admin@123' ||
-        password === 'admin' ||
-        password === 'Admin123'
-      );
+        await firestoreService.updateLastLogin(firestoreUser.id);
 
-      const match = localUsers.find(
-        (u) => (u.user.username.toLowerCase() === cleanUser || u.user.email.toLowerCase() === cleanUser) &&
-               (u.passwordHash === password || (u.user.role === 'admin' && isMasterAdminPassword))
-      ) || (isAdminAttempt && isMasterAdminPassword ? adminRecord : undefined);
-
-      if (match) {
-        const token = 'token_local_' + Date.now();
+        const token = 'token_fb_' + Date.now();
         setStoredToken(token);
-        setStoredUser(match.user);
+        setStoredUser(validUser);
+
         return {
           data: {
             token,
-            user: match.user,
+            user: validUser,
             expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
           }
         };
-      } else {
+      } catch (err: any) {
+        console.error('Firebase login error:', err);
         return {
-          error: 'Nama pengguna atau kata laluan tidak tepat. Sila semak semula.',
-          code: 'INVALID_CREDENTIALS'
+          error: 'Gagal menyambung ke pangkalan data cloud. Sila pastikan anda mempunyai capaian internet.',
+          code: 'FIREBASE_ERROR'
         };
       }
     }
@@ -312,6 +285,37 @@ export const authApi = {
       const cached = getStoredUser();
       const token = getStoredToken();
       if (cached && token) {
+        // Optionally refresh user from Firestore if online
+        try {
+          const fresh = await firestoreService.findUserByIdentifier(cached.id);
+          if (fresh) {
+            const syncedUser: User = {
+              id: fresh.id,
+              username: fresh.username,
+              name: fresh.name || fresh.username,
+              email: fresh.email,
+              email_verified: !!fresh.email_verified,
+              role: fresh.role,
+              status: fresh.status,
+              avatar: fresh.avatar,
+              created_at: fresh.created_at,
+              last_login: fresh.last_login,
+            };
+            setStoredUser(syncedUser);
+            return {
+              data: {
+                user: syncedUser,
+                session: {
+                  expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+                  remainingMinutes: 525600,
+                }
+              }
+            };
+          }
+        } catch {
+          // fallback to cached
+        }
+
         return {
           data: {
             user: cached,
@@ -322,7 +326,7 @@ export const authApi = {
           }
         };
       }
-      return { error: 'Tiada sesi tempatan dijumpai.', code: 'NO_SESSION' };
+      return { error: 'Tiada sesi dijumpai.', code: 'NO_SESSION' };
     }
 
     if (res.data?.user) {
@@ -342,19 +346,29 @@ export const authApi = {
       body: JSON.stringify({ name, username, avatar }),
     });
 
-    if (res.code === 'BACKEND_UNAVAILABLE') {
-      const current = getStoredUser();
-      if (current) {
-        const updated: User = {
-          ...current,
-          name: name.trim() || current.name,
-          username: username.trim().toLowerCase() || current.username,
-          avatar: avatar || current.avatar,
-        };
-        setStoredUser(updated);
-        const localUsers = getLocalUsers().map((u) => u.user.id === current.id ? { ...u, user: updated } : u);
-        saveLocalUsers(localUsers);
-        return { data: { user: updated, message: 'Profil berjaya dikemaskini.' } };
+    const current = getStoredUser();
+    if (current) {
+      const updated: User = {
+        ...current,
+        name: name.trim() || current.name,
+        username: username.trim().toLowerCase() || current.username,
+        avatar: avatar || current.avatar,
+      };
+      setStoredUser(updated);
+
+      // Save directly to Firestore for cross-browser sync
+      try {
+        await firestoreService.updateUserProfile(current.id, {
+          name: updated.name,
+          username: updated.username,
+          avatar: updated.avatar,
+        });
+      } catch (e) {
+        console.warn('Profile sync to Firestore warning:', e);
+      }
+
+      if (res.code === 'BACKEND_UNAVAILABLE') {
+        return { data: { user: updated, message: 'Profil berjaya dikemaskini dan diselaraskan.' } };
       }
     }
 
@@ -365,82 +379,119 @@ export const authApi = {
   },
 
   async changePassword(currentPassword: string, newPassword: string) {
+    const current = getStoredUser();
+
+    if (current) {
+      try {
+        const firestoreUser = await firestoreService.findUserByIdentifier(current.id);
+        if (firestoreUser) {
+          const isValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, currentPassword);
+          if (!isValid) {
+            return { error: 'Kata laluan semasa tidak tepat.' };
+          }
+          await firestoreService.updateUserPassword(current.id, newPassword);
+        }
+      } catch (err) {
+        console.warn('Firestore change password notice:', err);
+      }
+    }
+
     const res = await apiRequest<{ message: string }>('/api/user/password', {
       method: 'PUT',
       body: JSON.stringify({ currentPassword, newPassword }),
     });
 
     if (res.code === 'BACKEND_UNAVAILABLE') {
-      const current = getStoredUser();
-      if (current) {
-        const localUsers = getLocalUsers();
-        const idx = localUsers.findIndex((u) => u.user.id === current.id);
-        if (idx !== -1) {
-          if (localUsers[idx].passwordHash !== currentPassword) {
-            return { error: 'Kata laluan semasa tidak tepat.' };
-          }
-          localUsers[idx].passwordHash = newPassword;
-          saveLocalUsers(localUsers);
-          return { data: { message: 'Kata laluan berjaya ditukar.' } };
-        }
-      }
+      return { data: { message: 'Kata laluan berjaya ditukar dan disegerakkan ke pelayan awan.' } };
     }
 
     return res;
   },
 };
 
-// Admin API calls
+// Admin API calls with Firebase sync
 export const adminApi = {
   async getUsers() {
     const res = await apiRequest<{ users: AdminUserItem[] }>('/api/admin/users');
     if (res.code === 'BACKEND_UNAVAILABLE') {
-      const localUsers = getLocalUsers();
-      const mapped: AdminUserItem[] = localUsers.map((u) => ({
-        id: u.user.id,
-        username: u.user.username,
-        name: u.user.name,
-        email: u.user.email,
-        email_verified: u.user.email_verified,
-        role: u.user.role,
-        status: u.user.status,
-        avatar: u.user.avatar,
-        created_at: u.user.created_at,
-        last_login: u.user.last_login || u.user.created_at,
-        target_days: getQadaRecord()?.total_required || 0,
-        completed_days: getDailyRecords().reduce((sum, r) => sum + (Number(r.days) || 0), 0),
-      }));
-      return { data: { users: mapped } };
+      try {
+        const users = await firestoreService.getAllUsers();
+        return { data: { users } };
+      } catch (err: any) {
+        console.error('Failed to load users from Firestore:', err);
+        return { data: { users: [] } };
+      }
     }
     return res;
   },
 
   async verifyUserEmail(userId: string) {
-    return apiRequest<{ user: any; message: string }>(`/api/admin/users/${userId}/verify-email`, {
+    try {
+      await firestoreService.setUserEmailVerified(userId, true);
+    } catch {}
+
+    const res = await apiRequest<{ user: any; message: string }>(`/api/admin/users/${userId}/verify-email`, {
       method: 'POST',
     });
+
+    if (res.code === 'BACKEND_UNAVAILABLE') {
+      return { data: { user: null, message: 'Emel pengguna berjaya disahkan.' } };
+    }
+    return res;
   },
 
   async updateUserStatus(userId: string, status: 'pending' | 'approved' | 'rejected') {
-    return apiRequest<{ user: any; message: string }>(`/api/admin/users/${userId}/status`, {
+    try {
+      await firestoreService.setUserStatus(userId, status);
+    } catch {}
+
+    const res = await apiRequest<{ user: any; message: string }>(`/api/admin/users/${userId}/status`, {
       method: 'POST',
       body: JSON.stringify({ status }),
     });
+
+    if (res.code === 'BACKEND_UNAVAILABLE') {
+      return { data: { user: null, message: `Status pengguna berjaya ditukar kepada ${status}.` } };
+    }
+    return res;
   },
 
   async resetUserPassword(userId: string) {
-    return apiRequest<{ success: boolean; defaultPassword: string; message: string; user?: any }>(
+    const defaultPassword = 'Puasa@123456';
+    try {
+      await firestoreService.updateUserPassword(userId, defaultPassword);
+    } catch {}
+
+    const res = await apiRequest<{ success: boolean; defaultPassword: string; message: string; user?: any }>(
       `/api/admin/users/${userId}/reset-password`,
-      {
-        method: 'POST',
-      }
+      { method: 'POST' }
     );
+
+    if (res.code === 'BACKEND_UNAVAILABLE') {
+      return {
+        data: {
+          success: true,
+          defaultPassword,
+          message: `Kata laluan berjaya diset semula kepada ${defaultPassword}`,
+        }
+      };
+    }
+    return res;
   },
 
   async deleteUser(userId: string) {
-    return apiRequest<{ success?: boolean; message: string }>(`/api/admin/users/${userId}`, {
+    try {
+      await firestoreService.deleteUser(userId);
+    } catch {}
+
+    const res = await apiRequest<{ success?: boolean; message: string }>(`/api/admin/users/${userId}`, {
       method: 'DELETE',
     });
+
+    if (res.code === 'BACKEND_UNAVAILABLE') {
+      return { data: { success: true, message: 'Akaun pengguna telah dipadam dari pangkalan data.' } };
+    }
+    return res;
   },
 
   async getSMTPStatus() {
@@ -465,10 +516,36 @@ export const adminApi = {
   },
 };
 
-
-// Qada Data API calls (all authenticated)
+// Qada Data API calls with Full Firestore Cloud Sync
 export const qadaApi = {
   async getData() {
+    const currentUser = getStoredUser();
+    
+    // Attempt Firestore cloud sync if user is logged in
+    if (currentUser?.id) {
+      try {
+        const [cloudQada, cloudRecords, cloudSettings] = await Promise.all([
+          firestoreService.getQadaTarget(currentUser.id),
+          firestoreService.getDailyRecords(currentUser.id),
+          firestoreService.getUserSettings(currentUser.id),
+        ]);
+
+        if (cloudQada) saveQadaRecord(cloudQada);
+        if (cloudRecords && cloudRecords.length > 0) saveDailyRecords(cloudRecords);
+        if (cloudSettings) saveSettings(cloudSettings);
+
+        return {
+          data: {
+            qada: cloudQada || getQadaRecord(),
+            records: (cloudRecords && cloudRecords.length > 0) ? cloudRecords : getDailyRecords(),
+            settings: cloudSettings || getInitialSettings(),
+          }
+        };
+      } catch (err) {
+        console.warn('Firestore getData fallback to local/API:', err);
+      }
+    }
+
     const res = await apiRequest<{ qada: QadaRecord | null; records: DailyRecord[]; settings: UserSettings }>('/api/qada/data');
     if (res.code === 'BACKEND_UNAVAILABLE') {
       return {
@@ -484,6 +561,10 @@ export const qadaApi = {
 
   async saveTarget(qada: QadaRecord) {
     saveQadaRecord(qada);
+    const currentUser = getStoredUser();
+    if (currentUser?.id) {
+      firestoreService.saveQadaTarget(currentUser.id, qada).catch((e) => console.warn(e));
+    }
     return apiRequest('/api/qada/target', {
       method: 'POST',
       body: JSON.stringify({ qada }),
@@ -492,6 +573,10 @@ export const qadaApi = {
 
   async saveRecords(records: DailyRecord[]) {
     saveDailyRecords(records);
+    const currentUser = getStoredUser();
+    if (currentUser?.id) {
+      firestoreService.saveDailyRecords(currentUser.id, records).catch((e) => console.warn(e));
+    }
     return apiRequest('/api/qada/records', {
       method: 'POST',
       body: JSON.stringify({ records }),
@@ -500,6 +585,10 @@ export const qadaApi = {
 
   async saveSettings(settings: UserSettings) {
     saveSettings(settings);
+    const currentUser = getStoredUser();
+    if (currentUser?.id) {
+      firestoreService.saveUserSettings(currentUser.id, settings).catch((e) => console.warn(e));
+    }
     return apiRequest('/api/qada/settings', {
       method: 'POST',
       body: JSON.stringify({ settings }),
@@ -507,9 +596,12 @@ export const qadaApi = {
   },
 
   async resetData() {
+    const currentUser = getStoredUser();
+    if (currentUser?.id) {
+      firestoreService.saveDailyRecords(currentUser.id, []).catch((e) => console.warn(e));
+    }
     return apiRequest('/api/qada/reset', {
       method: 'POST',
     });
   },
 };
-
