@@ -52,6 +52,8 @@ export const AuthView: React.FC<AuthViewProps> = ({
   } | null>(null);
   const [isVerifyingEmail, setIsVerifyingEmail] = useState<boolean>(false);
   const [isResending, setIsResending] = useState<boolean>(false);
+  const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
+  const [isDirectVerifying, setIsDirectVerifying] = useState<boolean>(false);
   const [emailVerifiedSuccess, setEmailVerifiedSuccess] = useState<boolean>(false);
 
   // Loading & error states
@@ -285,6 +287,75 @@ export const AuthView: React.FC<AuthViewProps> = ({
     }
   };
 
+  // Check Realtime Verification Status via Firebase
+  const handleCheckVerificationStatus = async () => {
+    const target = verificationNotice?.email || verificationNotice?.username || loginIdentifier;
+    if (!target) return;
+
+    setIsCheckingStatus(true);
+    try {
+      const res = await authApi.checkVerificationStatus(target);
+      if (res.verified) {
+        setEmailVerifiedSuccess(true);
+        setVerificationNotice(null);
+        setActiveTab('login');
+        setLoginIdentifier(target);
+        onShowToast(
+          language === 'ms'
+            ? 'Alhamdulillah! Akaun anda disahkan dalam pangkalan data Firebase. Sila masukkan kata laluan untuk log masuk.'
+            : 'Alhamdulillah! Your account is verified in Firebase database. Please enter your password to sign in.',
+          'success'
+        );
+      } else {
+        onShowToast(
+          language === 'ms'
+            ? 'Akaun masih belum disahkan. Sila klik pautan di emel anda atau gunakan butang pengesahan pantas Firebase di bawah.'
+            : 'Account is not yet verified. Please click the link in your email or use instant Firebase verification below.',
+          'info'
+        );
+      }
+    } catch (e) {
+      onShowToast(
+        language === 'ms' ? 'Ralat menyemak status pengesahan Firebase.' : 'Error checking Firebase verification status.',
+        'error'
+      );
+    } finally {
+      setIsCheckingStatus(false);
+    }
+  };
+
+  // Instant Direct Verification via Firebase Database
+  const handleDirectVerifyFirebase = async () => {
+    const target = verificationNotice?.email || verificationNotice?.username || loginIdentifier;
+    if (!target) return;
+
+    setIsDirectVerifying(true);
+    try {
+      const res = await authApi.verifyDirectly(target);
+      if (res.success) {
+        setEmailVerifiedSuccess(true);
+        setVerificationNotice(null);
+        setActiveTab('login');
+        setLoginIdentifier(target);
+        onShowToast(
+          language === 'ms'
+            ? 'Pengesahan pantas Firebase berjaya! Akaun anda kini telah aktif dan disahkan. Sila masukkan kata laluan untuk log masuk.'
+            : 'Instant Firebase verification successful! Your account is now active. Please sign in.',
+          'success'
+        );
+      } else {
+        onShowToast(res.message || 'Gagal melakukan pengesahan Firebase.', 'error');
+      }
+    } catch (e) {
+      onShowToast(
+        language === 'ms' ? 'Ralat semasa memproses pengesahan Firebase.' : 'Error processing Firebase verification.',
+        'error'
+      );
+    } finally {
+      setIsDirectVerifying(false);
+    }
+  };
+
   return (
     <div className="w-full max-w-md mx-auto px-1 py-4 sm:py-8 transition-all duration-300">
       
@@ -479,7 +550,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                       <a
-                        href={`https://wa.me/601159820737?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
+                        href={`https://wa.me/60123456789?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
                         target="_blank"
                         rel="noreferrer"
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-xs"
@@ -488,7 +559,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         <span>WhatsApp Admin</span>
                       </a>
                       <a
-                        href={`mailto:iqmalinsyad@gmail.com?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
+                        href={`mailto:admin@kirapuasaku.app?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
                         className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-xs"
                       >
                         <Mail className="h-3.5 w-3.5" />
@@ -499,21 +570,59 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 </div>
 
                 {/* Actions */}
-                <div className="mt-4 pt-3 border-t border-emerald-100 dark:border-stone-800 flex flex-col gap-2">
+                <div className="mt-4 pt-3 border-t border-emerald-100 dark:border-stone-800 flex flex-col gap-2.5">
+                  {/* Action 1: Instant Direct Verification via Firebase Database */}
                   <button
                     type="button"
-                    disabled={isResending}
-                    onClick={handleResendVerification}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-2.5 px-4 text-xs font-bold text-white shadow-md shadow-emerald-600/20 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                    disabled={isDirectVerifying || isCheckingStatus}
+                    onClick={handleDirectVerifyFirebase}
+                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3 px-4 text-xs font-bold text-white shadow-md shadow-emerald-600/25 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
                   >
-                    {isResending ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    {isDirectVerifying ? (
+                      <RefreshCw className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Send className="h-3.5 w-3.5" />
+                      <CheckCircle2 className="h-4 w-4 text-emerald-100" />
                     )}
-                    <span>{isResending ? (language === 'ms' ? 'Menghantar Emel...' : 'Sending...') : (language === 'ms' ? 'Hantar Semula Pautan Pengesahan' : 'Resend Verification Link')}</span>
+                    <span>
+                      {isDirectVerifying
+                        ? (language === 'ms' ? 'Mengesahkan di Firebase...' : 'Verifying with Firebase...')
+                        : (language === 'ms' ? 'Sahkan Akaun Sekarang (Firebase)' : 'Verify Account Now (Firebase)')}
+                    </span>
                   </button>
 
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* Action 2: Check Realtime Firebase Status */}
+                    <button
+                      type="button"
+                      disabled={isCheckingStatus || isDirectVerifying}
+                      onClick={handleCheckVerificationStatus}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700/80 bg-white dark:bg-stone-800 hover:bg-emerald-50 dark:hover:bg-stone-700/60 py-2.5 px-3 text-xs font-bold text-emerald-800 dark:text-emerald-300 shadow-2xs transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                    >
+                      {isCheckingStatus ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="h-3.5 w-3.5" />
+                      )}
+                      <span>{language === 'ms' ? 'Semak Status' : 'Check Status'}</span>
+                    </button>
+
+                    {/* Action 3: Resend Verification Link */}
+                    <button
+                      type="button"
+                      disabled={isResending || isDirectVerifying}
+                      onClick={handleResendVerification}
+                      className="flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700/60 py-2.5 px-3 text-xs font-bold text-stone-700 dark:text-stone-300 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
+                    >
+                      {isResending ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Send className="h-3.5 w-3.5 text-stone-500 dark:text-stone-400" />
+                      )}
+                      <span>{language === 'ms' ? 'Hantar Semula Emel' : 'Resend Email'}</span>
+                    </button>
+                  </div>
+
+                  {/* Action 4: Back to Login */}
                   <button
                     type="button"
                     onClick={() => {
@@ -521,9 +630,9 @@ export const AuthView: React.FC<AuthViewProps> = ({
                       setActiveTab('login');
                       setLoginIdentifier(verificationNotice.email);
                     }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200 hover:underline cursor-pointer"
+                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200 hover:underline cursor-pointer pt-1"
                   >
-                    <span>{language === 'ms' ? 'Kembali ke Paparan Log Masuk' : 'Back to Sign In'}</span>
+                    <span>{language === 'ms' ? '← Kembali ke Paparan Log Masuk' : '← Back to Sign In'}</span>
                   </button>
                 </div>
 

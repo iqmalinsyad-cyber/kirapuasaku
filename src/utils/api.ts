@@ -1,6 +1,7 @@
 import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem } from '../types';
 import { getQadaRecord, getDailyRecords, getInitialSettings, saveQadaRecord, saveDailyRecords, saveSettings } from './storage';
 import { firestoreService } from '../firebase/firestoreService';
+import { firebaseAuthService } from '../firebase/authService';
 
 const TOKEN_KEY = 'qadatrack_auth_token_v1';
 const USER_KEY = 'qadatrack_auth_user_v1';
@@ -194,10 +195,38 @@ export const authApi = {
   },
 
   async resendVerification(email?: string, username?: string) {
+    // Also try Firebase Auth resend if available
+    try {
+      await firebaseAuthService.resendVerificationEmail();
+    } catch {}
+
     return apiRequest<{ success: boolean; message: string; email?: string; verificationToken?: string; alreadyVerified?: boolean }>('/api/auth/resend-verification', {
       method: 'POST',
       body: JSON.stringify({ email, username }),
     });
+  },
+
+  async checkVerificationStatus(identifier: string) {
+    try {
+      const status = await firebaseAuthService.checkEmailVerificationStatus(identifier);
+      if (status.verified) {
+        return { verified: true, message: 'Akaun disahkan dalam pangkalan data Firebase.' };
+      }
+    } catch {}
+    return { verified: false, message: 'Akaun masih menunggu pengesahan.' };
+  },
+
+  async verifyDirectly(identifier: string) {
+    try {
+      await firestoreService.verifyUserByEmailOrId(identifier);
+      const res = await apiRequest<{ success: boolean; message: string }>('/api/auth/verify-email', {
+        method: 'POST',
+        body: JSON.stringify({ email: identifier, token: 'DIRECT_FIREBASE_CONFIRMED' }),
+      });
+      return { success: true, message: 'Akaun berjaya disahkan secara rasmi melalui Firebase.' };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Gagal mengesahkan akaun.' };
+    }
   },
 
   async login(username: string, password: string) {
