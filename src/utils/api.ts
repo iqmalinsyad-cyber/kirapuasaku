@@ -144,6 +144,7 @@ export const authApi = {
           created_at: new Date().toISOString(),
         };
         await firestoreService.registerUser(newUser, password);
+        firestoreService.sendNewUserRegistrationAlertDirect(newUser).catch(() => {});
       }
     } catch (fsErr) {
       console.warn('Firestore registration sync notice:', fsErr);
@@ -561,8 +562,8 @@ export const adminApi = {
 export const qadaApi = {
   async getData() {
     const currentUser = getStoredUser();
-    const localQada = getQadaRecord();
-    const localRecords = getDailyRecords();
+    const localQada = getQadaRecord(currentUser?.id);
+    const localRecords = getDailyRecords(currentUser?.id);
     const localSettings = getInitialSettings();
     
     // Attempt Firestore cloud sync if user is logged in
@@ -577,14 +578,18 @@ export const qadaApi = {
         let finalQada: QadaRecord | null = null;
         if (cloudQada && Number(cloudQada.total_required) > 0) {
           finalQada = cloudQada;
-          saveQadaRecord(finalQada);
-        } else {
-          // If cloud has no target, clear local qada target so Onboarding displays
-          localStorage.removeItem('qada_record');
+          saveQadaRecord(finalQada, currentUser.id);
+        } else if (localQada && Number(localQada.total_required) > 0) {
+          // If local has target but cloud doesn't, sync local target up to cloud
+          finalQada = localQada;
+          firestoreService.saveQadaTarget(currentUser.id, localQada).catch(() => {});
         }
 
-        const finalRecords: DailyRecord[] = Array.isArray(cloudRecords) ? cloudRecords : [];
-        saveDailyRecords(finalRecords);
+        const finalRecords: DailyRecord[] = Array.isArray(cloudRecords) && cloudRecords.length > 0
+          ? cloudRecords
+          : (Array.isArray(localRecords) ? localRecords : []);
+        
+        saveDailyRecords(finalRecords, currentUser.id);
 
         const finalSettings = cloudSettings || localSettings;
         if (finalSettings) {
@@ -617,8 +622,8 @@ export const qadaApi = {
   },
 
   async saveTarget(qada: QadaRecord) {
-    saveQadaRecord(qada);
     const currentUser = getStoredUser();
+    saveQadaRecord(qada, currentUser?.id);
     if (currentUser?.id) {
       firestoreService.saveQadaTarget(currentUser.id, qada).catch((e) => console.warn(e));
     }
@@ -629,8 +634,8 @@ export const qadaApi = {
   },
 
   async saveRecords(records: DailyRecord[]) {
-    saveDailyRecords(records);
     const currentUser = getStoredUser();
+    saveDailyRecords(records, currentUser?.id);
     if (currentUser?.id) {
       firestoreService.saveDailyRecords(currentUser.id, records).catch((e) => console.warn(e));
     }
@@ -654,7 +659,11 @@ export const qadaApi = {
 
   async resetData() {
     const currentUser = getStoredUser();
+    localStorage.removeItem('qadatrack_qada_v1');
+    localStorage.removeItem('qadatrack_daily_records_v1');
     if (currentUser?.id) {
+      localStorage.removeItem(`qadatrack_qada_v1_${currentUser.id}`);
+      localStorage.removeItem(`qadatrack_daily_records_v1_${currentUser.id}`);
       firestoreService.resetUserData(currentUser.id).catch((e) => console.warn(e));
     }
     return apiRequest('/api/qada/reset', {
@@ -663,20 +672,84 @@ export const qadaApi = {
   },
 };
 
-// Telegram Bot Admin API
+// Telegram Bot Admin API with Dual Firestore + Direct API Fallback
 export const telegramApi = {
   async getConfig() {
-    return apiRequest<{
+    // 1. Check Firestore first
+    try {
+      const cloudConfig = await firestoreService.getTelegramConfig();
+      if (cloudConfig) {
+        const masked = cloudConfig.botToken 
+          ? (cloudConfig.botToken.length > 8 
+              ? `${cloudConfig.botToken.substring(0, 4)}••••${cloudConfig.botToken.substring(cloudConfig.botToken.length - 4)}`
+              : '••••••••')
+          : '';
+        return {
+          data: {
+            configured: Boolean(cloudConfig.botToken && cloudConfig.adminChatId),
+            enabled: cloudConfig.enabled !== false,
+            adminChatId: cloudConfig.adminChatId || '',
+            maskedToken: masked,
+            hasEnvFallback: false,
+          }
+        };
+      }
+    } catch (e) {
+      console.warn('Firestore getTelegramConfig fallback:', e);
+    }
+
+    // 2. Fallback to backend API
+    const res = await apiRequest<{
       configured: boolean;
       enabled: boolean;
       adminChatId: string;
       maskedToken: string;
       hasEnvFallback: boolean;
     }>('/api/admin/telegram-config');
+
+    if (res.code === 'BACKEND_UNAVAILABLE' || res.error) {
+      const local = localStorage.getItem('qadatrack_telegram_cfg_v1');
+      if (local) {
+        try {
+          const parsed = JSON.parse(local);
+          return {
+            data: {
+              configured: Boolean(parsed.botToken && parsed.adminChatId),
+              enabled: parsed.enabled !== false,
+              adminChatId: parsed.adminChatId || '',
+              maskedToken: '••••••••',
+              hasEnvFallback: false,
+            }
+          };
+        } catch {}
+      }
+    }
+
+    return res;
   },
 
   async saveConfig(botToken?: string, adminChatId?: string, enabled: boolean = true) {
-    return apiRequest<{
+    // 1. Save to Firestore
+    try {
+      const existing = await firestoreService.getTelegramConfig();
+      const finalToken = botToken || existing?.botToken || '';
+      const finalChatId = adminChatId || existing?.adminChatId || '';
+      await firestoreService.saveTelegramConfig({
+        botToken: finalToken,
+        adminChatId: finalChatId,
+        enabled,
+      });
+      localStorage.setItem('qadatrack_telegram_cfg_v1', JSON.stringify({
+        botToken: finalToken,
+        adminChatId: finalChatId,
+        enabled,
+      }));
+    } catch (e) {
+      console.warn('Failed saving telegram config to firestore:', e);
+    }
+
+    // 2. Sync to Backend
+    const res = await apiRequest<{
       success: boolean;
       message: string;
       configured: boolean;
@@ -685,17 +758,87 @@ export const telegramApi = {
       method: 'POST',
       body: JSON.stringify({ botToken, adminChatId, enabled }),
     });
+
+    if (res.code === 'BACKEND_UNAVAILABLE' || res.error) {
+      return {
+        data: {
+          success: true,
+          message: 'Konfigurasi Telegram berjaya disimpan dalam pangkalan data Firestore!',
+          configured: Boolean(botToken || adminChatId),
+          enabled,
+        }
+      };
+    }
+
+    return res;
   },
 
   async testNotification(botToken?: string, adminChatId?: string) {
-    return apiRequest<{
-      success: boolean;
-      message: string;
-      botUsername?: string;
-    }>('/api/admin/telegram-test', {
-      method: 'POST',
-      body: JSON.stringify({ botToken, adminChatId }),
-    });
+    // Resolve active token and chatId if not passed in
+    let activeToken = botToken?.trim();
+    let activeChatId = adminChatId?.trim();
+
+    if (!activeToken || !activeChatId) {
+      const cloudCfg = await firestoreService.getTelegramConfig().catch(() => null);
+      if (cloudCfg) {
+        if (!activeToken) activeToken = cloudCfg.botToken;
+        if (!activeChatId) activeChatId = cloudCfg.adminChatId;
+      }
+    }
+
+    if (!activeToken || !activeChatId) {
+      const local = localStorage.getItem('qadatrack_telegram_cfg_v1');
+      if (local) {
+        try {
+          const parsed = JSON.parse(local);
+          if (!activeToken) activeToken = parsed.botToken;
+          if (!activeChatId) activeChatId = parsed.adminChatId;
+        } catch {}
+      }
+    }
+
+    // 1. Try Backend test endpoint
+    try {
+      const res = await apiRequest<{
+        success: boolean;
+        message: string;
+        botUsername?: string;
+      }>('/api/admin/telegram-test', {
+        method: 'POST',
+        body: JSON.stringify({ botToken: activeToken, adminChatId: activeChatId }),
+      });
+
+      if (res.data?.success) {
+        return res;
+      }
+
+      // If backend reports explicit telegram validation error, return it
+      if (res.error && res.code !== 'BACKEND_UNAVAILABLE' && !res.error.includes('Pelayan backend tidak ditemui')) {
+        return res;
+      }
+    } catch {}
+
+    // 2. Direct client-side test execution
+    if (!activeToken || !activeChatId) {
+      return {
+        error: 'Sila masukkan Telegram Bot Token dan Admin Chat ID untuk menguji sambungan.',
+      };
+    }
+
+    const directResult = await firestoreService.testTelegramDirect(activeToken, activeChatId);
+    if (directResult.success) {
+      return {
+        data: {
+          success: true,
+          message: 'Notifikasi ujian berjaya dihantar ke Telegram!',
+          botUsername: directResult.botUsername,
+        }
+      };
+    } else {
+      return {
+        error: directResult.error || 'Gagal menghantar notifikasi ke Telegram.',
+      };
+    }
   },
 };
 

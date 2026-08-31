@@ -188,13 +188,14 @@ export const STATE_FIDYAH_RATES: StateFidyahInfo[] = [
 
 /**
  * Converts a Gregorian date string (YYYY-MM-DD) or Date object to Islamic Hijri Calendar Date
- * Calibrated for Malaysian / JAKIM e-Solat Takwim
+ * Calibrated for Malaysian / JAKIM e-Solat Takwim (https://www.e-solat.gov.my/index.php?siteId=24&pageId=26)
  */
 export function getHijriDate(dateInput: string | Date, adjustmentDays: number = 0, lang: Language = 'ms'): HijriDateInfo {
   let date: Date;
   if (typeof dateInput === 'string') {
     const [y, m, d] = dateInput.split('-').map(Number);
-    date = new Date(y, m - 1, d);
+    // Use midday to avoid any local timezone shifts
+    date = new Date(y, m - 1, d, 12, 0, 0);
   } else {
     date = new Date(dateInput);
   }
@@ -204,34 +205,63 @@ export function getHijriDate(dateInput: string | Date, adjustmentDays: number = 
     date = new Date(date.getTime() + adjustmentDays * 86400000);
   }
 
-  // Astronomical Julian day calculation algorithm calibrated for JAKIM Islamic Takwim
-  const y = date.getFullYear();
-  let m = date.getMonth() + 1;
-  const d = date.getDate();
+  let hijriDay = 1;
+  let hijriMonth = 1;
+  let hijriYear = 1448;
 
-  let jd: number;
-  if (m <= 2) {
-    const yr = y - 1;
-    const mn = m + 12;
-    const a = Math.floor(yr / 100);
-    const b = 2 - a + Math.floor(a / 4);
-    jd = Math.floor(365.25 * (yr + 4716)) + Math.floor(30.6001 * (mn + 1)) + d + b - 1524.5;
-  } else {
-    const a = Math.floor(y / 100);
-    const b = 2 - a + Math.floor(a / 4);
-    jd = Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + b - 1524.5;
+  let intlSuccess = false;
+  try {
+    const formatter = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', {
+      day: 'numeric',
+      month: 'numeric',
+      year: 'numeric',
+      timeZone: 'Asia/Kuala_Lumpur',
+    });
+    const parts = formatter.formatToParts(date);
+    const dVal = parts.find((p) => p.type === 'day')?.value;
+    const mVal = parts.find((p) => p.type === 'month')?.value;
+    const yVal = parts.find((p) => p.type === 'year')?.value;
+
+    if (dVal && mVal && yVal) {
+      hijriDay = parseInt(dVal, 10);
+      hijriMonth = parseInt(mVal, 10);
+      hijriYear = parseInt(yVal.replace(/[^0-9]/g, ''), 10);
+      intlSuccess = true;
+    }
+  } catch {
+    intlSuccess = false;
   }
 
-  // Julian Day to Hijri conversion (Islamic epoch JD 1948439.5)
-  const z = Math.floor(jd + 0.5);
-  const l = z - 1948440 + 10632;
-  const n = Math.floor((l - 1) / 10631);
-  const l2 = l - 10631 * n + 354;
-  const j = (Math.floor((10985 - l2) / 5316)) * (Math.floor((50 * l2) / 17719)) + (Math.floor(l2 / 5670)) * (Math.floor((43 * l2) / 15238));
-  const l3 = l2 - (Math.floor((30 - j) / 15)) * (Math.floor((17719 * j) / 50)) - (Math.floor(j / 16)) * (Math.floor((15238 * j) / 43)) + 29;
-  const hijriMonth = Math.floor((24 * l3) / 709);
-  const hijriDay = l3 - Math.floor((709 * hijriMonth) / 24);
-  const hijriYear = 30 * n + j - 30;
+  // Calibrated astronomical algorithm fallback (aligned with JAKIM e-Solat)
+  if (!intlSuccess) {
+    const calDate = new Date(date.getTime() + 86400000); // 1-day alignment for Malaysia Takwim
+    const y = calDate.getFullYear();
+    let m = calDate.getMonth() + 1;
+    const d = calDate.getDate();
+
+    let jd: number;
+    if (m <= 2) {
+      const yr = y - 1;
+      const mn = m + 12;
+      const a = Math.floor(yr / 100);
+      const b = 2 - a + Math.floor(a / 4);
+      jd = Math.floor(365.25 * (yr + 4716)) + Math.floor(30.6001 * (mn + 1)) + d + b - 1524.5;
+    } else {
+      const a = Math.floor(y / 100);
+      const b = 2 - a + Math.floor(a / 4);
+      jd = Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + b - 1524.5;
+    }
+
+    const z = Math.floor(jd + 0.5);
+    const l = z - 1948440 + 10632;
+    const n = Math.floor((l - 1) / 10631);
+    const l2 = l - 10631 * n + 354;
+    const j = (Math.floor((10985 - l2) / 5316)) * (Math.floor((50 * l2) / 17719)) + (Math.floor(l2 / 5670)) * (Math.floor((43 * l2) / 15238));
+    const l3 = l2 - (Math.floor((30 - j) / 15)) * (Math.floor((17719 * j) / 50)) - (Math.floor(j / 16)) * (Math.floor((15238 * j) / 43)) + 29;
+    hijriMonth = Math.floor((24 * l3) / 709);
+    hijriDay = l3 - Math.floor((709 * hijriMonth) / 24);
+    hijriYear = 30 * n + j - 30;
+  }
 
   const monthIndex = Math.max(0, Math.min(11, hijriMonth - 1));
   const monthNames = lang === 'ms' ? HIJRI_MONTHS_MS : HIJRI_MONTHS_EN;
@@ -330,10 +360,52 @@ export function getHijriDate(dateInput: string | Date, adjustmentDays: number = 
 }
 
 /**
+ * Calculates deadline and detailed countdown for Ramadan 1448 Hijrah & upcoming Ramadan
+ * Calibrated with JAKIM e-Solat Takwim: 1 Ramadan 1448H = 8 Februari 2027
+ */
+export function getRamadan1448CountdownInfo(referenceDate: Date = new Date(), lang: Language = 'ms') {
+  const currentHijri = getHijriDate(referenceDate, 0, lang);
+  
+  // Official target date for 1 Ramadan 1448H (8 Feb 2027)
+  const ramadan1448Date = new Date(2027, 1, 8, 0, 0, 0); // 8 Feb 2027
+  const ramadan1448End = new Date(2027, 2, 9, 23, 59, 59); // 9 March 2027 (End of Ramadan 1448H)
+  
+  const now = referenceDate;
+  const diffMs = ramadan1448Date.getTime() - now.getTime();
+  
+  const isOngoing = now.getTime() >= ramadan1448Date.getTime() && now.getTime() <= ramadan1448End.getTime();
+  const isPassed = now.getTime() > ramadan1448End.getTime();
+  const isUpcoming = diffMs > 0;
+
+  const totalSeconds = Math.max(0, Math.floor(diffMs / 1000));
+  const days = Math.floor(totalSeconds / (3600 * 24));
+  const hours = Math.floor((totalSeconds % (3600 * 24)) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  return {
+    targetHijriYear: 1448,
+    targetTitle: lang === 'ms' ? '1 Ramadan 1448 Hijrah' : '1 Ramadan 1448 Hijri',
+    targetGregorianFormatted: lang === 'ms' ? '8 Februari 2027 (Isnin)' : '8 February 2027 (Monday)',
+    targetDate: ramadan1448Date,
+    currentHijri,
+    daysLeft: days,
+    hoursLeft: hours,
+    minutesLeft: minutes,
+    secondsLeft: seconds,
+    totalSecondsLeft: totalSeconds,
+    isUpcoming,
+    isOngoing,
+    isPassed,
+    officialPortalUrl: 'https://www.e-solat.gov.my/index.php?siteId=24&pageId=26',
+  };
+}
+
+/**
  * Calculates deadline for Qada before next Ramadan (1 Ramadan)
  */
 export function getNextRamadanInfo(referenceDate: Date = new Date(), lang: Language = 'ms') {
-  const currentHijri = getHijriDate(referenceDate);
+  const currentHijri = getHijriDate(referenceDate, 0, lang);
   
   // Ramadan is Month 9
   let targetHijriYear = currentHijri.year;
@@ -342,26 +414,21 @@ export function getNextRamadanInfo(referenceDate: Date = new Date(), lang: Langu
     targetHijriYear += 1;
   }
 
-  // Approximate Gregorian date for 1 Ramadan of targetHijriYear
-  // Calibrated reference points:
-  // 1 Ramadan 1447H: approx 18 Feb 2026
-  // 1 Ramadan 1448H: approx 8 Feb 2027
-  // 1 Ramadan 1449H: approx 28 Jan 2028
+  // Exact Gregorian dates calibrated for JAKIM Malaysian Takwim
   let estimatedDate: Date;
   if (targetHijriYear === 1447) {
-    estimatedDate = new Date(2026, 1, 18);
+    estimatedDate = new Date(2026, 1, 18, 0, 0, 0); // 18 Feb 2026
   } else if (targetHijriYear === 1448) {
-    estimatedDate = new Date(2027, 1, 8);
+    estimatedDate = new Date(2027, 1, 8, 0, 0, 0); // 8 Feb 2027
   } else if (targetHijriYear === 1449) {
-    estimatedDate = new Date(2028, 0, 28);
+    estimatedDate = new Date(2028, 0, 28, 0, 0, 0); // 28 Jan 2028
   } else {
-    // Mathematical projection: Hijri year has ~354.36 days
-    const diffYears = targetHijriYear - 1447;
-    const baseTime = new Date(2026, 1, 18).getTime();
-    estimatedDate = new Date(baseTime + diffYears * 354.36 * 86400000);
+    const diffYears = targetHijriYear - 1448;
+    const baseTime = new Date(2027, 1, 8).getTime();
+    estimatedDate = new Date(baseTime + diffYears * 354.367 * 86400000);
   }
 
-  const now = new Date();
+  const now = referenceDate;
   const diffMs = estimatedDate.getTime() - now.getTime();
   const daysLeft = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
 

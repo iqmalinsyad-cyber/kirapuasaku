@@ -65,8 +65,12 @@ export function saveSettings(settings: UserSettings): void {
   }
 }
 
-export function getQadaRecord(): QadaRecord | null {
+export function getQadaRecord(userId?: string): QadaRecord | null {
   try {
+    if (userId) {
+      const userRaw = localStorage.getItem(`${STORAGE_KEY_QADA}_${userId}`);
+      if (userRaw) return JSON.parse(userRaw);
+    }
     const raw = localStorage.getItem(STORAGE_KEY_QADA);
     if (raw) return JSON.parse(raw);
   } catch (e) {
@@ -75,16 +79,27 @@ export function getQadaRecord(): QadaRecord | null {
   return null;
 }
 
-export function saveQadaRecord(qada: QadaRecord): void {
+export function saveQadaRecord(qada: QadaRecord, userId?: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY_QADA, JSON.stringify(qada));
+    const serialized = JSON.stringify(qada);
+    localStorage.setItem(STORAGE_KEY_QADA, serialized);
+    if (userId) {
+      localStorage.setItem(`${STORAGE_KEY_QADA}_${userId}`, serialized);
+    }
   } catch (e) {
     console.error('Failed to save qada target', e);
   }
 }
 
-export function getDailyRecords(): DailyRecord[] {
+export function getDailyRecords(userId?: string): DailyRecord[] {
   try {
+    if (userId) {
+      const userRaw = localStorage.getItem(`${STORAGE_KEY_RECORDS}_${userId}`);
+      if (userRaw) {
+        const records: DailyRecord[] = JSON.parse(userRaw);
+        return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      }
+    }
     const raw = localStorage.getItem(STORAGE_KEY_RECORDS);
     if (raw) {
       const records: DailyRecord[] = JSON.parse(raw);
@@ -97,9 +112,13 @@ export function getDailyRecords(): DailyRecord[] {
   return [];
 }
 
-export function saveDailyRecords(records: DailyRecord[]): void {
+export function saveDailyRecords(records: DailyRecord[], userId?: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY_RECORDS, JSON.stringify(records));
+    const serialized = JSON.stringify(records);
+    localStorage.setItem(STORAGE_KEY_RECORDS, serialized);
+    if (userId) {
+      localStorage.setItem(`${STORAGE_KEY_RECORDS}_${userId}`, serialized);
+    }
   } catch (e) {
     console.error('Failed to save daily records', e);
   }

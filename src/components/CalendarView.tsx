@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Edit2, Trash2, Moon, ExternalLink, ShieldAlert, Sparkles, SlidersHorizontal } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus, Edit2, Trash2, Moon, ExternalLink, ShieldAlert, Sparkles, SlidersHorizontal, Clock, Star } from 'lucide-react';
 import { DailyRecord, Language } from '../types';
 import { getTranslation } from '../translations';
-import { formatDateMalay, getTodayDateString, getDayOfWeekName, getHijriDate, HijriDateInfo } from '../utils/date';
+import { formatDateMalay, getTodayDateString, getDayOfWeekName, getHijriDate, HijriDateInfo, getRamadan1448CountdownInfo } from '../utils/date';
 
 interface CalendarViewProps {
   records: DailyRecord[];
@@ -25,6 +25,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [hijriAdjustment, setHijriAdjustment] = useState<number>(0);
+  const [now, setNow] = useState<Date>(new Date());
+
+  // Live second updater for Countdown
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const ramadan1448Countdown = useMemo(() => {
+    return getRamadan1448CountdownInfo(now, language);
+  }, [now, language]);
 
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth(); // 0 to 11
@@ -185,6 +198,74 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           >
             <span>{t.today}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Countdown 1 Ramadan 1448 Hijrah Banner (Selari Takwim JAKIM e-Solat: 8 Feb 2027) */}
+      <div className="rounded-2xl border border-emerald-200/80 bg-gradient-to-r from-emerald-900 via-emerald-800 to-teal-900 p-4 sm:p-5 text-white shadow-md relative overflow-hidden">
+        <div className="absolute right-0 top-0 -mt-6 -mr-6 h-36 w-36 rounded-full bg-emerald-500/10 blur-2xl pointer-events-none" />
+        
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 relative z-10">
+          <div>
+            <div className="inline-flex items-center gap-1.5 rounded-full bg-white/15 backdrop-blur-xs px-2.5 py-0.5 text-[11px] font-medium text-emerald-100 mb-1.5 border border-white/10">
+              <Sparkles className="h-3 w-3 text-amber-300" />
+              <span>{language === 'ms' ? 'Hitung Detik Ramadan 1448 Hijrah' : 'Ramadan 1448 Hijri Countdown'}</span>
+            </div>
+            <h2 className="text-lg sm:text-xl font-bold tracking-tight font-sans text-white flex items-center gap-2">
+              <span>{ramadan1448Countdown.targetTitle}</span>
+              <span className="text-xs font-normal text-emerald-200/90 font-mono">({ramadan1448Countdown.targetGregorianFormatted})</span>
+            </h2>
+            <p className="text-xs text-emerald-100/80 mt-0.5 max-w-xl">
+              {language === 'ms' 
+                ? 'Selari dengan Takwim Hijrah JAKIM e-Solat (1 Ramadan 1448H dijangka jatuh pada 8 Februari 2027).' 
+                : 'Aligned with JAKIM e-Solat Takwim (1 Ramadan 1448H expected on 8 February 2027).'}
+            </p>
+          </div>
+
+          {/* Countdown Clock Units */}
+          <div className="flex items-center gap-2 sm:gap-2.5 font-mono">
+            <div className="flex flex-col items-center justify-center rounded-xl bg-white/10 backdrop-blur-md px-3 py-2 border border-white/15 min-w-[56px] sm:min-w-[64px]">
+              <span className="text-xl sm:text-2xl font-bold text-white leading-tight">
+                {ramadan1448Countdown.daysLeft}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-emerald-200 font-sans font-semibold">
+                {language === 'ms' ? 'Hari' : 'Days'}
+              </span>
+            </div>
+
+            <span className="text-xl font-bold text-emerald-300/70 -mt-2">:</span>
+
+            <div className="flex flex-col items-center justify-center rounded-xl bg-white/10 backdrop-blur-md px-3 py-2 border border-white/15 min-w-[50px] sm:min-w-[58px]">
+              <span className="text-xl sm:text-2xl font-bold text-white leading-tight">
+                {String(ramadan1448Countdown.hoursLeft).padStart(2, '0')}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-emerald-200 font-sans font-semibold">
+                {language === 'ms' ? 'Jam' : 'Hours'}
+              </span>
+            </div>
+
+            <span className="text-xl font-bold text-emerald-300/70 -mt-2">:</span>
+
+            <div className="flex flex-col items-center justify-center rounded-xl bg-white/10 backdrop-blur-md px-3 py-2 border border-white/15 min-w-[50px] sm:min-w-[58px]">
+              <span className="text-xl sm:text-2xl font-bold text-white leading-tight">
+                {String(ramadan1448Countdown.minutesLeft).padStart(2, '0')}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-emerald-200 font-sans font-semibold">
+                {language === 'ms' ? 'Minit' : 'Min'}
+              </span>
+            </div>
+
+            <span className="text-xl font-bold text-emerald-300/70 -mt-2">:</span>
+
+            <div className="flex flex-col items-center justify-center rounded-xl bg-emerald-500/20 backdrop-blur-md px-3 py-2 border border-emerald-400/30 min-w-[50px] sm:min-w-[58px]">
+              <span className="text-xl sm:text-2xl font-bold text-amber-300 leading-tight">
+                {String(ramadan1448Countdown.secondsLeft).padStart(2, '0')}
+              </span>
+              <span className="text-[9px] uppercase tracking-wider text-amber-200 font-sans font-semibold">
+                {language === 'ms' ? 'Saat' : 'Sec'}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 

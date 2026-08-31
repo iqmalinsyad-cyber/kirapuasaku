@@ -31,6 +31,14 @@ const USERS_COLLECTION = 'users';
 const QADA_COLLECTION = 'qada_records';
 const RECORDS_COLLECTION = 'daily_records';
 const SETTINGS_COLLECTION = 'user_settings';
+const SYSTEM_SETTINGS_COLLECTION = 'system_settings';
+
+export interface TelegramFirestoreConfig {
+  botToken?: string;
+  adminChatId?: string;
+  enabled: boolean;
+  updated_at?: string;
+}
 
 // Hash helper for client-side password hashing (SHA-256)
 export async function hashPasswordClient(password: string): Promise<string> {
@@ -347,6 +355,7 @@ export const firestoreService = {
   // Qada Target Firestore Sync
   async getQadaTarget(userId: string): Promise<QadaRecord | null> {
     try {
+      // Primary user document check
       const snap = await getDoc(doc(db, QADA_COLLECTION, userId));
       if (snap.exists()) {
         const data = snap.data();
@@ -354,6 +363,23 @@ export const firestoreService = {
           return data as QadaRecord;
         }
       }
+
+      // If user is admin, check possible admin alias documents
+      if (userId === 'usr_admin_root' || userId === 'admin_root' || userId.includes('admin')) {
+        const adminAliases = ['usr_admin_root', 'admin_root', 'user_admin_001'];
+        for (const alias of adminAliases) {
+          if (alias !== userId) {
+            const aliasSnap = await getDoc(doc(db, QADA_COLLECTION, alias)).catch(() => null);
+            if (aliasSnap && aliasSnap.exists()) {
+              const aliasData = aliasSnap.data();
+              if (aliasData && Number(aliasData.total_required) > 0) {
+                return aliasData as QadaRecord;
+              }
+            }
+          }
+        }
+      }
+
       return null;
     } catch (err) {
       console.warn('Firestore getQadaTarget err:', err);
@@ -388,6 +414,23 @@ export const firestoreService = {
         const data = snap.data();
         return data.items || [];
       }
+
+      // If user is admin, check possible admin alias documents
+      if (userId === 'usr_admin_root' || userId === 'admin_root' || userId.includes('admin')) {
+        const adminAliases = ['usr_admin_root', 'admin_root', 'user_admin_001'];
+        for (const alias of adminAliases) {
+          if (alias !== userId) {
+            const aliasSnap = await getDoc(doc(db, RECORDS_COLLECTION, alias)).catch(() => null);
+            if (aliasSnap && aliasSnap.exists()) {
+              const aliasData = aliasSnap.data();
+              if (aliasData?.items && Array.isArray(aliasData.items)) {
+                return aliasData.items;
+              }
+            }
+          }
+        }
+      }
+
       return [];
     } catch (err) {
       console.warn('Firestore getDailyRecords err:', err);
@@ -459,6 +502,120 @@ export const firestoreService = {
       await setDoc(doc(db, SETTINGS_COLLECTION, userId), payload, { merge: true });
     } catch (err) {
       console.error('Firestore saveUserSettings err:', err);
+    }
+  },
+
+  // System Settings: Telegram Bot Configuration Persistence in Firestore
+  async getTelegramConfig(): Promise<TelegramFirestoreConfig | null> {
+    try {
+      const snap = await getDoc(doc(db, SYSTEM_SETTINGS_COLLECTION, 'telegram'));
+      if (snap.exists()) {
+        return snap.data() as TelegramFirestoreConfig;
+      }
+      return null;
+    } catch (err) {
+      console.warn('Firestore getTelegramConfig err:', err);
+      return null;
+    }
+  },
+
+  async saveTelegramConfig(config: TelegramFirestoreConfig): Promise<void> {
+    try {
+      const payload = cleanFirestoreData({
+        botToken: config.botToken || '',
+        adminChatId: config.adminChatId || '',
+        enabled: config.enabled !== false,
+        updated_at: new Date().toISOString(),
+      });
+      await setDoc(doc(db, SYSTEM_SETTINGS_COLLECTION, 'telegram'), payload, { merge: true });
+    } catch (err) {
+      console.error('Firestore saveTelegramConfig err:', err);
+    }
+  },
+
+  // Client-Side Direct Telegram Bot Test & Dispatch (bypasses backend timeout or static mode)
+  async testTelegramDirect(botToken: string, adminChatId: string): Promise<{ success: boolean; botUsername?: string; error?: string }> {
+    try {
+      // 1. Verify Bot Token via Telegram getMe
+      const meRes = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, {
+        method: 'GET',
+      });
+      const meData = await meRes.json().catch(() => ({}));
+      if (!meData.ok) {
+        return {
+          success: false,
+          error: meData.description || 'Bot Token tidak sah atau tidak dijumpai di Telegram.',
+        };
+      }
+
+      const botUsername = meData.result?.username;
+
+      // 2. Send Test Notification Message
+      const messageText = `🌙 <b>Ujian Sambungan Notifikasi KiraPuasaKu</b>\n\n` +
+        `✅ <b>Status:</b> Berjaya Disambungkan!\n` +
+        `🤖 <b>Bot:</b> @${botUsername || 'KiraPuasaKuBot'}\n` +
+        `🆔 <b>Admin Chat ID:</b> <code>${adminChatId}</code>\n` +
+        `📅 <b>Waktu:</b> ${new Date().toLocaleString('ms-MY', { timeZone: 'Asia/Kuala_Lumpur' })}\n\n` +
+        `Sistem notifikasi pendaftaran pengguna baharu sedia digunakan dengan lancar.`;
+
+      const sendRes = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: adminChatId,
+          text: messageText,
+          parse_mode: 'HTML',
+        }),
+      });
+
+      const sendData = await sendRes.json().catch(() => ({}));
+      if (!sendData.ok) {
+        return {
+          success: false,
+          error: sendData.description || 'Gagal menghantar mesej ke Admin Chat ID tersebut.',
+        };
+      }
+
+      return {
+        success: true,
+        botUsername,
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e.message || 'Ralat sambungan rangkaian ke Telegram API.',
+      };
+    }
+  },
+
+  // Client-Side Direct New User Registration Alert Dispatch
+  async sendNewUserRegistrationAlertDirect(user: User): Promise<void> {
+    try {
+      const config = await this.getTelegramConfig();
+      if (!config || !config.enabled || !config.botToken || !config.adminChatId) {
+        return;
+      }
+
+      const text = `🔔 <b>Pendaftaran Pengguna Baharu - KiraPuasaKu</b>\n\n` +
+        `👤 <b>Nama:</b> ${user.name}\n` +
+        `📛 <b>Username:</b> @${user.username}\n` +
+        `📧 <b>Emel:</b> ${user.email}\n` +
+        `🏷️ <b>Peranan:</b> ${user.role.toUpperCase()}\n` +
+        `📌 <b>Status:</b> ${user.status.toUpperCase()}\n` +
+        `📅 <b>Didaftarkan:</b> ${new Date().toLocaleString('ms-MY', { timeZone: 'Asia/Kuala_Lumpur' })}\n\n` +
+        `<i>Sila log masuk sebagai Admin untuk mengurus atau meluluskan akaun jika perlu.</i>`;
+
+      await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: config.adminChatId,
+          text,
+          parse_mode: 'HTML',
+        }),
+      }).catch((e) => console.warn('Direct telegram alert failed:', e));
+    } catch {
+      // Ignore background notification errors
     }
   },
 };
