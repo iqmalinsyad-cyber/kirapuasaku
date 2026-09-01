@@ -10,6 +10,9 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   avatar?: string;
+  registration_code?: string;
+  registration_code_used?: boolean;
+  code_type?: 'registration' | 'access';
   created_at: string;
   last_login?: string;
 }
@@ -23,6 +26,9 @@ export interface AdminUserItem {
   role: UserRole;
   status: UserStatus;
   avatar?: string;
+  registration_code?: string;
+  registration_code_used?: boolean;
+  code_type?: 'registration' | 'access';
   created_at: string;
   last_login?: string;
   qadaRequired?: number;

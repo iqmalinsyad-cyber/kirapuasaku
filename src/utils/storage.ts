@@ -34,8 +34,12 @@ export function saveUser(user: User): void {
   }
 }
 
-export function getInitialSettings(): UserSettings {
+export function getInitialSettings(userId?: string): UserSettings {
   try {
+    if (userId) {
+      const userRaw = localStorage.getItem(`${STORAGE_KEY_SETTINGS}_${userId}`);
+      if (userRaw) return JSON.parse(userRaw);
+    }
     const raw = localStorage.getItem(STORAGE_KEY_SETTINGS);
     if (raw) return JSON.parse(raw);
   } catch (e) {
@@ -46,8 +50,8 @@ export function getInitialSettings(): UserSettings {
     language: 'ms',
     userName: 'Pengguna',
     reminder: {
-      id: 'rem_1',
-      user_id: 'user_1',
+      id: 'rem_' + (userId || '1'),
+      user_id: userId || 'user_1',
       enabled: false,
       days: [1, 4], // Monday (1) & Thursday (4) Sunnah
       time: '20:00',
@@ -57,9 +61,14 @@ export function getInitialSettings(): UserSettings {
   };
 }
 
-export function saveSettings(settings: UserSettings): void {
+export function saveSettings(settings: UserSettings, userId?: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
+    const serialized = JSON.stringify(settings);
+    if (userId) {
+      localStorage.setItem(`${STORAGE_KEY_SETTINGS}_${userId}`, serialized);
+    } else {
+      localStorage.setItem(STORAGE_KEY_SETTINGS, serialized);
+    }
   } catch (e) {
     console.error('Failed to save settings', e);
   }
@@ -70,22 +79,30 @@ export function getQadaRecord(userId?: string): QadaRecord | null {
     if (userId) {
       const userRaw = localStorage.getItem(`${STORAGE_KEY_QADA}_${userId}`);
       if (userRaw) return JSON.parse(userRaw);
+      return null;
     }
-    const raw = localStorage.getItem(STORAGE_KEY_QADA);
-    if (raw) return JSON.parse(raw);
+    // Without specific userId, do not leak previous user's data
+    return null;
   } catch (e) {
     console.error('Failed to load qada target', e);
   }
   return null;
 }
 
-export function saveQadaRecord(qada: QadaRecord, userId?: string): void {
+export function saveQadaRecord(qada: QadaRecord | null, userId?: string): void {
   try {
+    if (!qada) {
+      if (userId) {
+        localStorage.removeItem(`${STORAGE_KEY_QADA}_${userId}`);
+      }
+      localStorage.removeItem(STORAGE_KEY_QADA);
+      return;
+    }
     const serialized = JSON.stringify(qada);
-    localStorage.setItem(STORAGE_KEY_QADA, serialized);
     if (userId) {
       localStorage.setItem(`${STORAGE_KEY_QADA}_${userId}`, serialized);
     }
+    localStorage.setItem(STORAGE_KEY_QADA, serialized);
   } catch (e) {
     console.error('Failed to save qada target', e);
   }
@@ -99,13 +116,9 @@ export function getDailyRecords(userId?: string): DailyRecord[] {
         const records: DailyRecord[] = JSON.parse(userRaw);
         return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       }
+      return [];
     }
-    const raw = localStorage.getItem(STORAGE_KEY_RECORDS);
-    if (raw) {
-      const records: DailyRecord[] = JSON.parse(raw);
-      // Sort newest first by date and created_at
-      return records.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }
+    return [];
   } catch (e) {
     console.error('Failed to load daily records', e);
   }
@@ -114,11 +127,11 @@ export function getDailyRecords(userId?: string): DailyRecord[] {
 
 export function saveDailyRecords(records: DailyRecord[], userId?: string): void {
   try {
-    const serialized = JSON.stringify(records);
-    localStorage.setItem(STORAGE_KEY_RECORDS, serialized);
+    const serialized = JSON.stringify(records || []);
     if (userId) {
       localStorage.setItem(`${STORAGE_KEY_RECORDS}_${userId}`, serialized);
     }
+    localStorage.setItem(STORAGE_KEY_RECORDS, serialized);
   } catch (e) {
     console.error('Failed to save daily records', e);
   }
@@ -181,9 +194,14 @@ export function importAllDataFromJSON(jsonString: string): boolean {
   }
 }
 
-export function resetAllData(): void {
+export function resetAllData(userId?: string): void {
   localStorage.removeItem(STORAGE_KEY_USER);
   localStorage.removeItem(STORAGE_KEY_QADA);
   localStorage.removeItem(STORAGE_KEY_RECORDS);
   localStorage.removeItem(STORAGE_KEY_SETTINGS);
+  if (userId) {
+    localStorage.removeItem(`${STORAGE_KEY_QADA}_${userId}`);
+    localStorage.removeItem(`${STORAGE_KEY_RECORDS}_${userId}`);
+    localStorage.removeItem(`${STORAGE_KEY_SETTINGS}_${userId}`);
+  }
 }

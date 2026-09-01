@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   User as UserIcon, Lock, Mail, ShieldAlert, 
   Eye, EyeOff, AlertCircle, ArrowRight, CheckCircle2, 
-  RefreshCw, Sparkles, Globe, Sun, Moon, ShieldCheck,
-  Send, Inbox, ExternalLink, Info, MessageCircle, HelpCircle
+  RefreshCw, Sparkles, KeyRound, Send
 } from 'lucide-react';
 import { Language, ThemeMode, User } from '../types';
 import { getTranslation } from '../translations';
@@ -21,15 +20,12 @@ interface AuthViewProps {
 
 export const AuthView: React.FC<AuthViewProps> = ({
   language,
-  theme,
-  onSetLanguage,
-  onSetTheme,
   onLoginSuccess,
   onShowToast,
 }) => {
   const t = getTranslation(language);
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register'>('login');
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'verifyCode'>('login');
   
   // Login form fields (allows username OR email)
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
@@ -44,16 +40,16 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [showRegPassword, setShowRegPassword] = useState<boolean>(false);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(MUSLIM_AVATARS[0].dataUrl);
 
-  // Email verification state (Formal flow - strictly via email link)
-  const [verificationNotice, setVerificationNotice] = useState<{
-    email: string;
+  // Special Code Verification fields
+  const [codeIdentifier, setCodeIdentifier] = useState<string>('');
+  const [verificationCodeInput, setVerificationCodeInput] = useState<string>('');
+  const [registeredUserInfo, setRegisteredUserInfo] = useState<{
     username: string;
-    name?: string;
+    email: string;
+    registration_code?: string;
   } | null>(null);
+
   const [isVerifyingEmail, setIsVerifyingEmail] = useState<boolean>(false);
-  const [isResending, setIsResending] = useState<boolean>(false);
-  const [isCheckingStatus, setIsCheckingStatus] = useState<boolean>(false);
-  const [isDirectVerifying, setIsDirectVerifying] = useState<boolean>(false);
   const [emailVerifiedSuccess, setEmailVerifiedSuccess] = useState<boolean>(false);
 
   // Loading & error states
@@ -74,15 +70,14 @@ export const AuthView: React.FC<AuthViewProps> = ({
         authApi.verifyEmail(verifyToken, emailParam || undefined).then((res) => {
           if (res.data?.success) {
             setEmailVerifiedSuccess(true);
-            setVerificationNotice(null);
             setActiveTab('login');
             if (emailParam) {
               setLoginIdentifier(emailParam);
             }
             onShowToast(
               language === 'ms' 
-                ? 'Alhamdulillah, pengesahan emel anda telah berjaya! Sila log masuk ke akaun anda.' 
-                : 'Alhamdulillah, email verification successful! Please sign in to your account.',
+                ? 'Alhamdulillah, akaun anda telah disahkan! Sila log masuk.' 
+                : 'Alhamdulillah, account verified! Please sign in.',
               'success'
             );
           } else if (res.error) {
@@ -92,12 +87,11 @@ export const AuthView: React.FC<AuthViewProps> = ({
         }).catch(() => {
           setErrorMessage(
             language === 'ms' 
-              ? 'Pautan pengesahan emel tidak sah atau telah tamat tempoh.' 
-              : 'Email verification link is invalid or expired.'
+              ? 'Pautan pengesahan tidak sah atau telah tamat tempoh.' 
+              : 'Verification link is invalid or expired.'
           );
         }).finally(() => {
           setIsVerifyingEmail(false);
-          // Clean the query parameters from the browser address bar cleanly
           window.history.replaceState({}, document.title, window.location.pathname);
         });
       }
@@ -107,7 +101,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
   }, [language, onShowToast]);
 
   // Switch tabs
-  const handleTabSwitch = (tab: 'login' | 'register') => {
+  const handleTabSwitch = (tab: 'login' | 'register' | 'verifyCode') => {
     setActiveTab(tab);
     setErrorMessage('');
     setEmailVerifiedSuccess(false);
@@ -136,32 +130,32 @@ export const AuthView: React.FC<AuthViewProps> = ({
         if (res.locked && res.remainingMinutes) {
           setLockoutMinutes(res.remainingMinutes);
         }
-
-        if (res.code === 'EMAIL_NOT_VERIFIED' || res.error.toLowerCase().includes('belum disahkan')) {
-          setVerificationNotice({
-            email: res.email || loginIdentifier.trim(),
-            username: res.username || loginIdentifier.trim(),
-          });
+        
+        // If requires code verification, switch to code tab
+        if (res.code === 'EMAIL_NOT_VERIFIED' || res.code === 'ACCOUNT_PENDING_VERIFICATION') {
+          setCodeIdentifier(res.username || loginIdentifier.trim());
+          setActiveTab('verifyCode');
           setErrorMessage(
             language === 'ms'
-              ? `Akaun anda (${res.email || loginIdentifier}) belum disahkan. Sila semak peti masuk emel anda dan klik pautan pengesahan rasmi.`
-              : `Your account (${res.email || loginIdentifier}) is not verified yet. Please check your email inbox and click the verification link.`
+              ? 'Akaun anda belum diaktifkan. Sila masukkan Kod Khas Pengesahan yang diberikan oleh Admin.'
+              : 'Your account is pending activation. Please enter the Special Code from Admin.'
           );
           onShowToast(
-            language === 'ms' 
-              ? 'Sila sahkan emel anda melalui pautan yang dihantar.' 
-              : 'Please verify your email via the link sent.', 
+            language === 'ms'
+              ? 'Sila masukkan Kod Khas Admin untuk mengaktifkan akaun.'
+              : 'Please enter Admin Special Code to activate account.',
             'info'
           );
-        } else {
-          setErrorMessage(res.error);
-          onShowToast(res.error, 'error');
+          return;
         }
+
+        setErrorMessage(res.error);
+        onShowToast(res.error, 'error');
       } else if (res.data?.user && res.data?.token) {
         onShowToast(
           language === 'ms' 
-            ? `Selamat kembali, ${res.data.user.name}!` 
-            : `Welcome back, ${res.data.user.name}!`, 
+            ? `Selamat kembali, ${res.data.user.name || res.data.user.username}!` 
+            : `Welcome back, ${res.data.user.name || res.data.user.username}!`, 
           'success'
         );
         onLoginSuccess(res.data.user, res.data.token);
@@ -226,23 +220,28 @@ export const AuthView: React.FC<AuthViewProps> = ({
       if (res.error) {
         setErrorMessage(res.error);
         onShowToast(res.error, 'error');
-      } else if (res.data) {
-        // Set formal verification notice screen
-        setVerificationNotice({
-          email: cleanMail,
-          username: cleanUser,
-          name: regFullName.trim() || cleanUser,
-        });
-
-        // Reset form fields
-        setRegPassword('');
-        setRegFullName('');
-
+      } else if (res.data?.user && res.data?.token && res.data.user.email_verified) {
         onShowToast(
           language === 'ms' 
-            ? 'Pendaftaran akaun berjaya! Sila semak emel anda untuk pautan pengesahan.' 
-            : 'Registration successful! Please check your email for the verification link.', 
+            ? `Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.` 
+            : `Registration successful! Welcome to KiraPuasaKu.`, 
           'success'
+        );
+        onLoginSuccess(res.data.user, res.data.token);
+      } else {
+        const generatedCode = (res.data as any)?.registration_code || (res.data?.user as any)?.registration_code;
+        setRegisteredUserInfo({
+          username: cleanUser,
+          email: cleanMail,
+          registration_code: generatedCode,
+        });
+        setCodeIdentifier(cleanUser);
+        setActiveTab('verifyCode');
+        onShowToast(
+          language === 'ms'
+            ? 'Pendaftaran direkodkan! Sila dapatkan Kod Khas daripada Admin untuk aktifkan akaun.'
+            : 'Registration recorded! Please obtain Special Code from Admin to activate.',
+          'info'
         );
       }
     } catch (err: any) {
@@ -256,103 +255,49 @@ export const AuthView: React.FC<AuthViewProps> = ({
     }
   };
 
-  // Resend Verification Email
-  const handleResendVerification = async () => {
-    const targetEmail = verificationNotice?.email || loginIdentifier;
-    const targetUser = verificationNotice?.username || loginIdentifier;
-    if (!targetEmail) return;
+  // Handle Verify Special Code (flow: Masukkan kod > Verify & Activate Account > masuk page log masuk)
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    const cleanId = codeIdentifier.trim().toLowerCase();
+    const cleanCode = verificationCodeInput.trim().toUpperCase().replace(/\s+/g, '');
 
-    setIsResending(true);
-    try {
-      const res = await authApi.resendVerification(targetEmail, targetUser);
-      if (res.data?.success || !res.error) {
-        onShowToast(
-          language === 'ms'
-            ? `Pautan pengesahan baharu telah berjaya dihantar ke ${targetEmail}. Sila semak peti masuk anda.`
-            : `A fresh verification link has been sent to ${targetEmail}. Please check your inbox.`,
-          'success'
-        );
-      } else if (res.error) {
-        onShowToast(res.error, 'error');
-      }
-    } catch (e) {
-      onShowToast(
-        language === 'ms' 
-          ? 'Gagal menghantar semula emel pengesahan. Sila cuba sebentar lagi.' 
-          : 'Failed to resend verification email. Please try again later.',
-        'error'
+    if (!cleanId || !cleanCode) {
+      setErrorMessage(
+        language === 'ms'
+          ? 'Sila masukkan Username/Emel dan Kod Khas Pendaftaran.'
+          : 'Please enter Username/Email and Special Registration Code.'
       );
-    } finally {
-      setIsResending(false);
+      return;
     }
-  };
 
-  // Check Realtime Verification Status via Firebase
-  const handleCheckVerificationStatus = async () => {
-    const target = verificationNotice?.email || verificationNotice?.username || loginIdentifier;
-    if (!target) return;
-
-    setIsCheckingStatus(true);
+    setIsLoading(true);
     try {
-      const res = await authApi.checkVerificationStatus(target);
-      if (res.verified) {
-        setEmailVerifiedSuccess(true);
-        setVerificationNotice(null);
-        setActiveTab('login');
-        setLoginIdentifier(target);
+      const res = await authApi.verifyCode(cleanId, cleanCode);
+      if (res.error) {
+        const errText = res.error || (language === 'ms' ? 'Kod yang dimasukkan tidak sah. Sila cuba lagi.' : 'The code entered is invalid. Please try again.');
+        setErrorMessage(errText);
+        onShowToast(errText, 'error');
+      } else if (res.data?.success || res.data?.user) {
         onShowToast(
           language === 'ms'
-            ? 'Alhamdulillah! Akaun anda disahkan dalam pangkalan data Firebase. Sila masukkan kata laluan untuk log masuk.'
-            : 'Alhamdulillah! Your account is verified in Firebase database. Please enter your password to sign in.',
+            ? 'Alhamdulillah, akaun anda telah berjaya diaktifkan! Sila log masuk.'
+            : 'Alhamdulillah, your account has been activated! Please sign in.',
           'success'
         );
-      } else {
-        onShowToast(
-          language === 'ms'
-            ? 'Akaun masih belum disahkan. Sila klik pautan di emel anda atau gunakan butang pengesahan pantas Firebase di bawah.'
-            : 'Account is not yet verified. Please click the link in your email or use instant Firebase verification below.',
-          'info'
-        );
-      }
-    } catch (e) {
-      onShowToast(
-        language === 'ms' ? 'Ralat menyemak status pengesahan Firebase.' : 'Error checking Firebase verification status.',
-        'error'
-      );
-    } finally {
-      setIsCheckingStatus(false);
-    }
-  };
-
-  // Instant Direct Verification via Firebase Database
-  const handleDirectVerifyFirebase = async () => {
-    const target = verificationNotice?.email || verificationNotice?.username || loginIdentifier;
-    if (!target) return;
-
-    setIsDirectVerifying(true);
-    try {
-      const res = await authApi.verifyDirectly(target);
-      if (res.success) {
         setEmailVerifiedSuccess(true);
-        setVerificationNotice(null);
+        setLoginIdentifier(cleanId);
+        setVerificationCodeInput('');
         setActiveTab('login');
-        setLoginIdentifier(target);
-        onShowToast(
-          language === 'ms'
-            ? 'Pengesahan pantas Firebase berjaya! Akaun anda kini telah aktif dan disahkan. Sila masukkan kata laluan untuk log masuk.'
-            : 'Instant Firebase verification successful! Your account is now active. Please sign in.',
-          'success'
-        );
-      } else {
-        onShowToast(res.message || 'Gagal melakukan pengesahan Firebase.', 'error');
       }
-    } catch (e) {
-      onShowToast(
-        language === 'ms' ? 'Ralat semasa memproses pengesahan Firebase.' : 'Error processing Firebase verification.',
-        'error'
-      );
+    } catch (err: any) {
+      const errText = language === 'ms'
+        ? 'Kod yang dimasukkan tidak sah atau ralat sambungan. Sila cuba lagi.'
+        : 'The code is invalid or connection error. Please try again.';
+      setErrorMessage(errText);
+      onShowToast(errText, 'error');
     } finally {
-      setIsDirectVerifying(false);
+      setIsLoading(false);
     }
   };
 
@@ -381,43 +326,55 @@ export const AuthView: React.FC<AuthViewProps> = ({
       {/* Main Authentication Card */}
       <div className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white/95 backdrop-blur-md shadow-xl shadow-stone-200/50 dark:border-stone-800/90 dark:bg-stone-900/95 dark:shadow-black/40 transition-colors">
         
-        {/* Modern Segmented Tab Switcher - Blue for Login, Green for Register */}
+        {/* Segmented Tab Switcher - 2 Tabs (Log Masuk & Daftar Akaun). Special code verification is hidden and appears upon registration or click. */}
         <div className="p-2 sm:p-2.5 bg-stone-100/70 dark:bg-stone-950/60 border-b border-stone-200/70 dark:border-stone-800/80">
-          <div className="grid grid-cols-2 gap-2 p-1 bg-stone-200/60 dark:bg-stone-900/90 rounded-2xl">
-            <button
-              id="tab-login-btn"
-              type="button"
-              onClick={() => {
-                handleTabSwitch('login');
-                setVerificationNotice(null);
-              }}
-              className={`flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all duration-200 cursor-pointer ${
-                activeTab === 'login' && !verificationNotice
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 scale-[1.01]'
-                  : 'text-stone-600 hover:text-blue-600 dark:text-stone-400 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/30'
-              }`}
-            >
-              <UserIcon className="h-3.5 w-3.5" />
-              <span>{t.tabLogin}</span>
-            </button>
+          {activeTab === 'verifyCode' ? (
+            <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 dark:bg-amber-950/40 rounded-2xl border border-amber-300/40 dark:border-amber-700/40">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <span className="text-xs font-bold text-amber-950 dark:text-amber-100">
+                  {t.codeVerificationTitle || 'Pengesahan Kod Khas Admin'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleTabSwitch('login')}
+                className="text-xs font-semibold text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-white transition flex items-center gap-1 cursor-pointer"
+              >
+                ← {t.btnLogin}
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-stone-200/60 dark:bg-stone-900/90 rounded-2xl">
+              <button
+                id="tab-login-btn"
+                type="button"
+                onClick={() => handleTabSwitch('login')}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
+                  activeTab === 'login'
+                    ? 'bg-blue-600 text-white shadow-md shadow-blue-600/30 scale-[1.01]'
+                    : 'text-stone-600 hover:text-blue-600 dark:text-stone-400 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/30'
+                }`}
+              >
+                <UserIcon className="h-3.5 w-3.5" />
+                <span>{t.tabLogin}</span>
+              </button>
 
-            <button
-              id="tab-register-btn"
-              type="button"
-              onClick={() => {
-                handleTabSwitch('register');
-                setVerificationNotice(null);
-              }}
-              className={`flex items-center justify-center gap-1.5 py-2.5 px-3 text-xs sm:text-sm font-bold rounded-xl transition-all duration-200 cursor-pointer ${
-                activeTab === 'register' || verificationNotice
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 scale-[1.01]'
-                  : 'text-stone-600 hover:text-emerald-600 dark:text-stone-400 dark:hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30'
-              }`}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              <span>{t.tabRegister}</span>
-            </button>
-          </div>
+              <button
+                id="tab-register-btn"
+                type="button"
+                onClick={() => handleTabSwitch('register')}
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 text-xs font-bold rounded-xl transition-all duration-200 cursor-pointer ${
+                  activeTab === 'register'
+                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 scale-[1.01]'
+                    : 'text-stone-600 hover:text-emerald-600 dark:text-stone-400 dark:hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                <span>{t.tabRegister}</span>
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="p-5 sm:p-7">
@@ -431,7 +388,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                   <p className="font-bold text-sm mb-0.5 text-emerald-900 dark:text-emerald-100">{t.emailVerifiedSuccessTitle}</p>
                   <p className="leading-relaxed text-emerald-800 dark:text-emerald-300 text-xs">
                     {language === 'ms' 
-                      ? 'Alamat emel anda telah disahkan sepenuhnya. Sila masukkan kata laluan untuk log masuk.' 
+                      ? 'Akaun anda telah diaktifkan. Sila masukkan kata laluan untuk log masuk.' 
                       : t.emailVerifiedSuccessMsg}
                   </p>
                 </div>
@@ -465,441 +422,408 @@ export const AuthView: React.FC<AuthViewProps> = ({
             <div className="mb-5 flex flex-col items-center justify-center p-6 text-center rounded-2xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
               <RefreshCw className="h-8 w-8 text-emerald-600 animate-spin mb-2" />
               <p className="text-sm font-bold text-emerald-900 dark:text-emerald-100">
-                {language === 'ms' ? 'Mengesahkan pautan emel anda...' : 'Verifying email link...'}
+                {language === 'ms' ? 'Mengesahkan akaun anda...' : 'Verifying your account...'}
               </p>
             </div>
           )}
 
-          {/* FORMAL NOTICE SCREEN: PENGESAHAN EMEL DIPERLUKAN */}
-          {verificationNotice ? (
-            <div className="space-y-4 animate-in fade-in zoom-in-95 duration-300">
-              <div className="rounded-2xl bg-gradient-to-b from-emerald-50/90 to-stone-50 p-5 border border-emerald-200/80 dark:from-stone-900 dark:to-stone-850 dark:border-emerald-900/60 text-stone-900 dark:text-stone-100 shadow-sm">
-                
-                {/* Formal Header */}
-                <div className="flex items-center gap-3 mb-3.5 pb-3 border-b border-emerald-100 dark:border-stone-800">
-                  <div className="h-10 w-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/20">
-                    <Mail className="h-5 w-5" />
+          {/* FORM 1: LOG MASUK (Warna Biru Moden) */}
+          {activeTab === 'login' && (
+            <form onSubmit={handleLogin} className="space-y-4">
+              
+              {/* Username or Email Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  {language === 'ms' ? 'Username atau Emel' : 'Username or Email'} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <UserIcon className="h-4 w-4" />
                   </div>
-                  <div>
-                    <h3 className="text-sm sm:text-base font-extrabold text-emerald-900 dark:text-emerald-200">
-                      {language === 'ms' ? 'Pengesahan Alamat Emel Rasmi' : 'Official Email Verification'}
-                    </h3>
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">
-                      {language === 'ms' ? 'Pendaftaran Akaun Berjaya' : 'Account Registered Successfully'}
-                    </p>
-                  </div>
+                  <input
+                    id="login-identifier-input"
+                    type="text"
+                    required
+                    value={loginIdentifier}
+                    onChange={(e) => setLoginIdentifier(e.target.value)}
+                    placeholder={language === 'ms' ? 'cth: ahmad atau ahmad@email.com' : 'e.g. ahmad or ahmad@email.com'}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
                 </div>
-
-                {/* Formal Message Body */}
-                <div className="space-y-3 text-xs leading-relaxed text-stone-700 dark:text-stone-300">
-                  <p>
-                    {language === 'ms' ? (
-                      <>
-                        Salam sejahtera, akaun bagi pengguna <strong className="text-stone-900 dark:text-white">@{verificationNotice.username}</strong> telah berjaya didaftarkan.
-                      </>
-                    ) : (
-                      <>
-                        Welcome, account for user <strong className="text-stone-900 dark:text-white">@{verificationNotice.username}</strong> has been registered.
-                      </>
-                    )}
-                  </p>
-
-                  <div className="p-3 bg-white dark:bg-stone-800 rounded-xl border border-emerald-200 dark:border-stone-700 flex items-center gap-2.5 shadow-2xs">
-                    <Inbox className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <div className="overflow-hidden">
-                      <p className="text-[10px] text-stone-500 dark:text-stone-400 font-medium">
-                        {language === 'ms' ? 'Pautan pengesahan telah dihantar ke:' : 'Verification link sent to:'}
-                      </p>
-                      <p className="font-mono font-bold text-xs text-emerald-800 dark:text-emerald-300 truncate">
-                        {verificationNotice.email}
-                      </p>
-                    </div>
-                  </div>
-
-                  <p className="text-stone-600 dark:text-stone-300">
-                    {language === 'ms' ? (
-                      <>
-                        Demi keselamatan akaun, sila buka peti masuk emel anda dan tekan butang <strong className="text-emerald-700 dark:text-emerald-400">"Sahkan Akaun Saya"</strong> di dalam emel tersebut untuk mengaktifkan akaun sebelum log masuk.
-                      </>
-                    ) : (
-                      <>
-                        For security purposes, please open your email inbox and click <strong className="text-emerald-700 dark:text-emerald-400">"Verify My Account"</strong> in the email to activate your access before signing in.
-                      </>
-                    )}
-                  </p>
-
-                  <div className="p-2.5 bg-amber-50/80 dark:bg-amber-950/30 rounded-xl border border-amber-200/70 dark:border-amber-900/50 text-[11px] text-amber-900 dark:text-amber-300 flex items-start gap-2">
-                    <Info className="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
-                    <span>
-                      {language === 'ms' 
-                        ? 'Sekiranya emel tidak kelihatan di peti masuk utama (Inbox), sila periksa folder Spam atau Junk Mail anda.' 
-                        : 'If you do not see the email in your main inbox, please check your Spam or Junk folder.'}
-                    </span>
-                  </div>
-
-                  {/* Hubungi Admin Card if email is not received */}
-                  <div className="p-3 bg-stone-100/90 dark:bg-stone-800/80 rounded-xl border border-stone-200 dark:border-stone-700 text-xs space-y-2.5">
-                    <div className="flex items-center gap-2 text-stone-900 dark:text-white font-bold text-[11px] sm:text-xs">
-                      <HelpCircle className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
-                      <span>{language === 'ms' ? 'Masih belum terima emel pengesahan?' : 'Still haven’t received the email?'}</span>
-                    </div>
-                    <p className="text-[11px] text-stone-600 dark:text-stone-300 leading-relaxed">
-                      {language === 'ms'
-                        ? 'Sila hubungi Admin untuk bantuan pengaktifan segera atau pengesahan akaun manual:'
-                        : 'Please contact the Admin for instant account activation or manual verification assistance:'}
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                      <a
-                        href={`https://wa.me/601159820737?text=${encodeURIComponent(`Salam Admin KiraPuasaKu, saya baru mendaftar akaun (${verificationNotice.username} / ${verificationNotice.email}) tetapi belum menerima emel pengesahan. Mohon bantuan pengaktifan akaun.`)}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] transition shadow-xs"
-                      >
-                        <MessageCircle className="h-3.5 w-3.5" />
-                        <span>WhatsApp Admin</span>
-                      </a>
-                      <a
-                        href={`mailto:iqmalinsyad@gmail.com?subject=${encodeURIComponent(`Bantuan Pengesahan Akaun KiraPuasaKu - ${verificationNotice.username}`)}&body=${encodeURIComponent(`Salam Admin,\n\nSaya telah mendaftar akaun:\nUsername: ${verificationNotice.username}\nEmel: ${verificationNotice.email}\n\nMohon semakan dan pengesahan akaun. Terima kasih.`)}`}
-                        className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] transition shadow-xs"
-                      >
-                        <Mail className="h-3.5 w-3.5" />
-                        <span>Emel Admin</span>
-                      </a>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Actions */}
-                <div className="mt-4 pt-3 border-t border-emerald-100 dark:border-stone-800 flex flex-col gap-2.5">
-                  {/* Action 1: Instant Direct Verification via Firebase Database */}
-                  <button
-                    type="button"
-                    disabled={isDirectVerifying || isCheckingStatus}
-                    onClick={handleDirectVerifyFirebase}
-                    className="w-full flex items-center justify-center gap-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 py-3 px-4 text-xs font-bold text-white shadow-md shadow-emerald-600/25 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                  >
-                    {isDirectVerifying ? (
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <CheckCircle2 className="h-4 w-4 text-emerald-100" />
-                    )}
-                    <span>
-                      {isDirectVerifying
-                        ? (language === 'ms' ? 'Mengesahkan di Firebase...' : 'Verifying with Firebase...')
-                        : (language === 'ms' ? 'Sahkan Akaun Sekarang (Firebase)' : 'Verify Account Now (Firebase)')}
-                    </span>
-                  </button>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {/* Action 2: Check Realtime Firebase Status */}
-                    <button
-                      type="button"
-                      disabled={isCheckingStatus || isDirectVerifying}
-                      onClick={handleCheckVerificationStatus}
-                      className="flex items-center justify-center gap-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700/80 bg-white dark:bg-stone-800 hover:bg-emerald-50 dark:hover:bg-stone-700/60 py-2.5 px-3 text-xs font-bold text-emerald-800 dark:text-emerald-300 shadow-2xs transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                    >
-                      {isCheckingStatus ? (
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      )}
-                      <span>{language === 'ms' ? 'Semak Status' : 'Check Status'}</span>
-                    </button>
-
-                    {/* Action 3: Resend Verification Link */}
-                    <button
-                      type="button"
-                      disabled={isResending || isDirectVerifying}
-                      onClick={handleResendVerification}
-                      className="flex items-center justify-center gap-1.5 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800 hover:bg-stone-100 dark:hover:bg-stone-700/60 py-2.5 px-3 text-xs font-bold text-stone-700 dark:text-stone-300 transition active:scale-[0.98] cursor-pointer disabled:opacity-50"
-                    >
-                      {isResending ? (
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Send className="h-3.5 w-3.5 text-stone-500 dark:text-stone-400" />
-                      )}
-                      <span>{language === 'ms' ? 'Hantar Semula Emel' : 'Resend Email'}</span>
-                    </button>
-                  </div>
-
-                  {/* Action 4: Back to Login */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setVerificationNotice(null);
-                      setActiveTab('login');
-                      setLoginIdentifier(verificationNotice.email);
-                    }}
-                    className="w-full flex items-center justify-center gap-1.5 py-2 px-3 text-xs font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-stone-200 hover:underline cursor-pointer pt-1"
-                  >
-                    <span>{language === 'ms' ? '← Kembali ke Paparan Log Masuk' : '← Back to Sign In'}</span>
-                  </button>
-                </div>
-
               </div>
-            </div>
-          ) : (
-            <>
-              {/* FORM 1: LOG MASUK (Warna Biru Moden) */}
-              {activeTab === 'login' && (
-                <form onSubmit={handleLogin} className="space-y-4">
-                  
-                  {/* Username or Email Input */}
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                      {language === 'ms' ? 'Username atau Emel' : 'Username or Email'} <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
-                        <UserIcon className="h-4 w-4" />
-                      </div>
-                      <input
-                        id="login-username-input"
-                        type="text"
-                        required
-                        value={loginIdentifier}
-                        onChange={(e) => setLoginIdentifier(e.target.value)}
-                        placeholder={language === 'ms' ? 'Masukkan username atau emel' : 'Enter username or email'}
-                        autoComplete="username"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
-                      />
-                    </div>
-                  </div>
 
-                  {/* Password Input */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                        {t.labelPassword} <span className="text-rose-500">*</span>
-                      </label>
-                    </div>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
-                        <Lock className="h-4 w-4" />
-                      </div>
-                      <input
-                        id="login-password-input"
-                        type={showLoginPassword ? 'text' : 'password'}
-                        required
-                        value={loginPassword}
-                        onChange={(e) => setLoginPassword(e.target.value)}
-                        placeholder={t.placeholderPassword}
-                        autoComplete="current-password"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLoginPassword(!showLoginPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer min-h-[44px] min-w-[44px] justify-center"
-                        aria-label={showLoginPassword ? 'Sembunyi kata laluan' : 'Papar kata laluan'}
-                      >
-                        {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
+              {/* Password Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  {t.labelPassword} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <Lock className="h-4 w-4" />
                   </div>
-
-                  {/* Submit Login Button (Blue Full Color) */}
+                  <input
+                    id="login-password-input"
+                    type={showLoginPassword ? 'text' : 'password'}
+                    required
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    placeholder={t.placeholderPassword}
+                    autoComplete="current-password"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-blue-600 focus:bg-white focus:ring-4 focus:ring-blue-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
                   <button
-                    id="login-submit-btn"
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-2 rounded-2xl bg-blue-600 hover:bg-blue-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-blue-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+                    type="button"
+                    onClick={() => setShowLoginPassword(!showLoginPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer min-h-[44px] min-w-[44px] justify-center"
+                    aria-label={showLoginPassword ? 'Sembunyi kata laluan' : 'Papar kata laluan'}
                   >
-                    {isLoading ? (
-                      <span className="flex items-center gap-2">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        {t.btnLoggingIn}
-                      </span>
-                    ) : (
-                      <>
-                        <span>{t.btnLogin}</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
+                    {showLoginPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
+                </div>
+              </div>
 
-                  {/* Quick switch to register prompt on mobile */}
-                  <div className="text-center pt-2">
-                    <p className="text-xs text-stone-500 dark:text-stone-400">
-                      {language === 'ms' ? 'Belum mempunyai akaun?' : "Don't have an account?"}{' '}
-                      <button
-                        type="button"
-                        onClick={() => handleTabSwitch('register')}
-                        className="font-bold text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
-                      >
-                        {language === 'ms' ? 'Daftar akaun baharu' : 'Sign up here'}
-                      </button>
-                    </p>
-                  </div>
-                </form>
-              )}
+              {/* Submit Login Button (Blue Color) */}
+              <button
+                id="login-submit-btn"
+                type="submit"
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 rounded-2xl bg-blue-600 hover:bg-blue-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-blue-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    {language === 'ms' ? 'Sedang Log Masuk...' : 'Signing in...'}
+                  </span>
+                ) : (
+                  <>
+                    <span>{t.btnLogin}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
 
-              {/* FORM 2: DAFTAR AKAUN BAHARU (Warna Hijau Moden) */}
-              {activeTab === 'register' && (
-                <form onSubmit={handleRegister} className="space-y-3.5">
-                  
-                  {/* 1. Username */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                      1. {t.labelUsername} <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
-                        <UserIcon className="h-4 w-4" />
-                      </div>
-                      <input
-                        id="register-username-input"
-                        type="text"
-                        required
-                        minLength={3}
-                        value={regUsername}
-                        onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
-                        placeholder={t.placeholderUsername}
-                        autoComplete="username"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
-                      />
-                    </div>
-                  </div>
-
-                  {/* 2. Email Address */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                      2. {t.labelEmail} <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
-                        <Mail className="h-4 w-4" />
-                      </div>
-                      <input
-                        id="register-email-input"
-                        type="email"
-                        required
-                        value={regEmail}
-                        onChange={(e) => setRegEmail(e.target.value)}
-                        placeholder={t.placeholderEmail}
-                        autoComplete="email"
-                        autoCapitalize="none"
-                        autoCorrect="off"
-                        inputMode="email"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
-                      />
-                    </div>
-                    <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                      {language === 'ms' ? 'Pautan pengesahan rasmi akan dihantar ke emel ini.' : 'Official verification link will be sent to this email.'}
-                    </p>
-                  </div>
-
-                  {/* 3. Password */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                      3. {t.labelPassword} <span className="text-rose-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
-                        <Lock className="h-4 w-4" />
-                      </div>
-                      <input
-                        id="register-password-input"
-                        type={showRegPassword ? 'text' : 'password'}
-                        required
-                        minLength={6}
-                        value={regPassword}
-                        onChange={(e) => setRegPassword(e.target.value)}
-                        placeholder={t.placeholderPassword}
-                        autoComplete="new-password"
-                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowRegPassword(!showRegPassword)}
-                        className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-stone-400 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer min-h-[44px] min-w-[44px] justify-center"
-                        aria-label={showRegPassword ? 'Sembunyi kata laluan' : 'Papar kata laluan'}
-                      >
-                        {showRegPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Choose Cute Muslim Avatar */}
-                  <div className="pt-1.5 space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
-                        {t.labelProfilePicture}
-                      </label>
-                      <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
-                        {language === 'ms' ? 'Pilih satu avatar' : 'Pick an avatar'}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-6 gap-2 sm:gap-2.5 p-2 bg-stone-50/80 dark:bg-stone-800/40 rounded-2xl border border-stone-200/70 dark:border-stone-800">
-                      {MUSLIM_AVATARS.map((av: MuslimAvatar) => {
-                        const isSelected = selectedAvatar === av.dataUrl;
-                        return (
-                          <button
-                            key={av.id}
-                            type="button"
-                            onClick={() => setSelectedAvatar(av.dataUrl)}
-                            className={`group relative flex items-center justify-center rounded-xl p-1 transition-all cursor-pointer border ${
-                              isSelected
-                                ? 'border-emerald-600 bg-white shadow-xs dark:bg-stone-800 dark:border-emerald-500 ring-2 ring-emerald-500/40 scale-105'
-                                : 'border-transparent bg-transparent hover:bg-stone-200/50 dark:hover:bg-stone-700/40 opacity-75 hover:opacity-100'
-                            }`}
-                            title={av.name}
-                          >
-                            <div className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg overflow-hidden shadow-2xs">
-                              <img src={av.dataUrl} alt={av.name} className="h-full w-full object-cover" />
-                            </div>
-                            {isSelected && (
-                              <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white text-[9px] font-bold shadow-2xs">
-                                ✓
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Submit Register Button (Emerald Green Full Color) */}
+              {/* Quick switch prompts */}
+              <div className="flex flex-col items-center gap-1.5 pt-2 text-center">
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  {language === 'ms' ? 'Belum mempunyai akaun?' : 'Don’t have an account?'}{' '}
                   <button
-                    id="register-submit-btn"
-                    type="submit"
-                    disabled={isLoading}
-                    className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-3"
+                    type="button"
+                    onClick={() => handleTabSwitch('register')}
+                    className="font-bold text-emerald-600 hover:underline dark:text-emerald-400 cursor-pointer"
                   >
-                    {isLoading ? (
-                      <span className="flex items-center gap-2">
-                        <RefreshCw className="h-4 w-4 animate-spin" />
-                        {t.btnRegistering}
-                      </span>
-                    ) : (
-                      <>
-                        <span>{t.btnRegister}</span>
-                        <ArrowRight className="h-4 w-4" />
-                      </>
-                    )}
+                    {language === 'ms' ? 'Daftar sekarang' : 'Register now'}
                   </button>
+                </p>
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  {language === 'ms' ? 'Ada Kod Khas daripada Admin?' : 'Have a special Admin code?'}{' '}
+                  <button
+                    type="button"
+                    onClick={() => handleTabSwitch('verifyCode')}
+                    className="font-bold text-amber-600 hover:underline dark:text-amber-400 cursor-pointer"
+                  >
+                    {language === 'ms' ? 'Sahkan kod di sini' : 'Verify code here'}
+                  </button>
+                </p>
+              </div>
+            </form>
+          )}
 
-                  {/* Quick switch to login prompt on mobile */}
-                  <div className="text-center pt-1.5">
-                    <p className="text-xs text-stone-500 dark:text-stone-400">
-                      {language === 'ms' ? 'Sudah mempunyai akaun?' : 'Already have an account?'}{' '}
+          {/* FORM 2: PENDAFTARAN AKAUN BAHARU (Warna Hijau Moden) */}
+          {activeTab === 'register' && (
+            <form onSubmit={handleRegister} className="space-y-3.5">
+              
+              {/* 1. Username */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  1. {t.labelUsername} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <UserIcon className="h-4 w-4" />
+                  </div>
+                  <input
+                    id="register-username-input"
+                    type="text"
+                    required
+                    minLength={3}
+                    value={regUsername}
+                    onChange={(e) => setRegUsername(e.target.value.toLowerCase().replace(/\s+/g, ''))}
+                    placeholder={t.placeholderUsername}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
+                </div>
+              </div>
+
+              {/* 2. Email Address */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  2. {t.labelEmail} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <input
+                    id="register-email-input"
+                    type="email"
+                    required
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    placeholder={t.placeholderEmail}
+                    autoComplete="email"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    inputMode="email"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
+                </div>
+              </div>
+
+              {/* 3. Password */}
+              <div className="space-y-1">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  3. {t.labelPassword} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <Lock className="h-4 w-4" />
+                  </div>
+                  <input
+                    id="register-password-input"
+                    type={showRegPassword ? 'text' : 'password'}
+                    required
+                    minLength={6}
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    placeholder={t.placeholderPassword}
+                    autoComplete="new-password"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-11 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-emerald-600 focus:bg-white focus:ring-4 focus:ring-emerald-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowRegPassword(!showRegPassword)}
+                    className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-stone-400 hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer min-h-[44px] min-w-[44px] justify-center"
+                    aria-label={showRegPassword ? 'Sembunyi kata laluan' : 'Papar kata laluan'}
+                  >
+                    {showRegPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Choose Cute Muslim Avatar */}
+              <div className="pt-1.5 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                    {t.labelProfilePicture}
+                  </label>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                    {language === 'ms' ? 'Pilih satu avatar' : 'Pick an avatar'}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-6 gap-2 sm:gap-2.5 p-2 bg-stone-50/80 dark:bg-stone-800/40 rounded-2xl border border-stone-200/70 dark:border-stone-800">
+                  {MUSLIM_AVATARS.map((av: MuslimAvatar) => {
+                    const isSelected = selectedAvatar === av.dataUrl;
+                    return (
                       <button
+                        key={av.id}
                         type="button"
-                        onClick={() => handleTabSwitch('login')}
-                        className="font-bold text-blue-600 hover:underline dark:text-blue-400 cursor-pointer"
+                        onClick={() => setSelectedAvatar(av.dataUrl)}
+                        className={`group relative flex items-center justify-center rounded-xl p-1 transition-all cursor-pointer border ${
+                          isSelected
+                            ? 'border-emerald-600 bg-white shadow-xs dark:bg-stone-800 dark:border-emerald-500 ring-2 ring-emerald-500/40 scale-105'
+                            : 'border-transparent bg-transparent hover:bg-stone-200/50 dark:hover:bg-stone-700/40 opacity-75 hover:opacity-100'
+                        }`}
+                        title={av.name}
                       >
-                        {language === 'ms' ? 'Log masuk di sini' : 'Log in here'}
+                        <div className="h-9 w-9 sm:h-10 sm:w-10 shrink-0 rounded-lg overflow-hidden shadow-2xs">
+                          <img src={av.dataUrl} alt={av.name} className="h-full w-full object-cover" />
+                        </div>
+                        {isSelected && (
+                          <span className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-white text-[9px] font-bold shadow-2xs">
+                            ✓
+                          </span>
+                        )}
                       </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Submit Register Button (Emerald Green Full Color) */}
+              <button
+                id="register-submit-btn"
+                type="submit"
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-3"
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    {t.btnRegistering}
+                  </span>
+                ) : (
+                  <>
+                    <span>{t.btnRegister}</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </>
+                )}
+              </button>
+
+              {/* Quick switch to login prompt on mobile */}
+              <div className="text-center pt-1.5">
+                <p className="text-xs text-stone-500 dark:text-stone-400">
+                  {language === 'ms' ? 'Sudah mempunyai akaun?' : 'Already have an account?'}{' '}
+                  <button
+                    type="button"
+                    onClick={() => handleTabSwitch('login')}
+                    className="font-bold text-blue-600 hover:underline dark:text-blue-400 cursor-pointer"
+                  >
+                    {language === 'ms' ? 'Log masuk di sini' : 'Log in here'}
+                  </button>
+                </p>
+              </div>
+            </form>
+          )}
+
+          {/* FORM 3: PENGESAHAN KOD KHAS ADMIN (Warna Amber/Gold Moden) */}
+          {activeTab === 'verifyCode' && (
+            <form onSubmit={handleVerifyCode} className="space-y-4">
+              
+              {/* Notice Banner */}
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-800 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                <div className="flex items-start gap-2.5">
+                  <KeyRound className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-1">
+                    <p className="font-bold text-xs sm:text-sm text-amber-950 dark:text-amber-100">
+                      {t.codeVerificationTitle || 'Pengesahan Kod Khas Admin'}
+                    </p>
+                    <p className="leading-relaxed text-stone-700 dark:text-stone-300 text-[11px]">
+                      {t.codeVerificationDesc || 'Sila masukkan Kod Khas Pengesahan yang diberikan oleh pihak Admin untuk mengaktifkan akaun anda.'}
                     </p>
                   </div>
-                </form>
-              )}
-            </>
+                </div>
+              </div>
+
+              {/* Username or Email Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  {language === 'ms' ? 'Username atau Emel Berdaftar' : 'Registered Username or Email'} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <UserIcon className="h-4 w-4" />
+                  </div>
+                  <input
+                    id="verify-code-identifier-input"
+                    type="text"
+                    required
+                    value={codeIdentifier}
+                    onChange={(e) => setCodeIdentifier(e.target.value)}
+                    placeholder={language === 'ms' ? 'Masukkan username atau emel' : 'Enter username or email'}
+                    autoComplete="username"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
+                </div>
+              </div>
+
+              {/* Special Code Input (No example code in placeholder) */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                  {t.labelRegistrationCode || 'Kod Khas Pendaftaran'} <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                    <KeyRound className="h-4 w-4" />
+                  </div>
+                  <input
+                    id="verify-code-input"
+                    type="text"
+                    required
+                    value={verificationCodeInput}
+                    onChange={(e) => setVerificationCodeInput(e.target.value.toUpperCase())}
+                    placeholder={t.placeholderRegistrationCode || 'Masukkan Kod Khas'}
+                    autoCapitalize="characters"
+                    autoCorrect="off"
+                    className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-mono font-bold tracking-wider text-amber-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-amber-200 dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                  />
+                </div>
+                <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                  {language === 'ms' ? '*Kod hanya sah digunakan untuk 1 kali pengesahan akaun.' : '*Code is valid for single-use account activation only.'}
+                </p>
+              </div>
+
+              {/* Submit Verify Code Button */}
+              <button
+                id="verify-code-submit-btn"
+                type="submit"
+                disabled={isLoading}
+                className="w-full flex items-center justify-center gap-2 rounded-2xl bg-amber-600 hover:bg-amber-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-amber-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+              >
+                {isLoading ? (
+                  <span className="flex items-center gap-2">
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    {language === 'ms' ? 'Mengesahkan Kod...' : 'Verifying Code...'}
+                  </span>
+                ) : (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    <span>{t.btnVerifyCode || 'Sahkan & Aktifkan Akaun'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* Contact Admin Assistance Section (Email & Telegram buttons) */}
+              <div className="mt-4 pt-4 border-t border-stone-200/80 dark:border-stone-800 space-y-2.5">
+                <p className="text-[11px] font-semibold text-center text-stone-600 dark:text-stone-400">
+                  {t.codeFailedContactHelp || 'Jika kod yang diberikan gagal disahkan atau belum menerima kod, hubungi Admin:'}
+                </p>
+
+                <div className="grid grid-cols-2 gap-2.5">
+                  <a
+                    id="btn-email-admin"
+                    href="mailto:iqmalinsyad@gmail.com?subject=Bantuan%20Pengesahan%20Kod%20KiraPuasaKu&body=Salam%20Admin%20Iqmal,%20saya%20memerlukan%20bantuan%20kod%20pengesahan%20akaun%20KiraPuasaKu."
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700/80 py-2.5 px-3 text-xs font-bold text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 transition cursor-pointer"
+                  >
+                    <Mail className="h-4 w-4 text-red-500 dark:text-red-400 shrink-0" />
+                    <span>{t.adminEmailBtn || 'Emel'}</span>
+                  </a>
+
+                  <a
+                    id="btn-telegram-admin"
+                    href="https://t.me/iqmalinsyad"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white py-2.5 px-3 text-xs font-bold shadow-xs transition cursor-pointer"
+                  >
+                    <Send className="h-4 w-4 shrink-0" />
+                    <span>{t.adminTelegramBtn || 'Telegram'}</span>
+                  </a>
+                </div>
+              </div>
+
+              {/* Return to Login */}
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleTabSwitch('login')}
+                  className="text-xs font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white cursor-pointer"
+                >
+                  ← {language === 'ms' ? 'Kembali ke Log Masuk' : 'Back to Sign In'}
+                </button>
+              </div>
+
+            </form>
           )}
 
         </div>

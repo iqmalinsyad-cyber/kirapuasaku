@@ -111,6 +111,7 @@ export const authApi = {
     const cleanUser = username.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
     const displayName = (name && name.trim()) || cleanUser;
+    const defaultAvatar = avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUser)}`;
 
     const res = await apiRequest<{
       success: boolean;
@@ -123,10 +124,13 @@ export const authApi = {
       user?: User;
     }>('/api/auth/register', {
       method: 'POST',
-      body: JSON.stringify({ username: cleanUser, email: cleanEmail, password, avatar, name: displayName }),
+      body: JSON.stringify({ username: cleanUser, email: cleanEmail, password, avatar: defaultAvatar, name: displayName }),
     });
 
-    // Also register in Firestore for cross-browser synchronization
+    let loggedInUser: User | undefined = res.data?.user;
+    let sessionToken: string | undefined = res.data?.token;
+
+    // Also register in Firestore for cross-device synchronization
     try {
       await firestoreService.ensureAdminExists();
       const existing = await firestoreService.findUserByIdentifier(cleanUser) || 
@@ -134,33 +138,119 @@ export const authApi = {
 
       if (!existing) {
         const newUser: User = {
-          id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+          id: loggedInUser?.id || ('usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
           username: cleanUser,
           name: displayName,
           email: cleanEmail,
-          email_verified: false, // Requires email link verification
+          email_verified: true,
           role: 'user',
-          status: 'pending',
-          avatar: avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUser)}`,
+          status: 'approved',
+          avatar: defaultAvatar,
           created_at: new Date().toISOString(),
+          last_login: new Date().toISOString(),
         };
         await firestoreService.registerUser(newUser, password);
         firestoreService.sendNewUserRegistrationAlertDirect(newUser).catch(() => {});
+        if (!loggedInUser) loggedInUser = newUser;
+      } else {
+        if (!loggedInUser) {
+          loggedInUser = {
+            id: existing.id,
+            username: existing.username,
+            name: existing.name || existing.username,
+            email: existing.email,
+            email_verified: true,
+            role: existing.role || 'user',
+            status: 'approved',
+            avatar: existing.avatar || defaultAvatar,
+            created_at: existing.created_at,
+          };
+        }
       }
     } catch (fsErr) {
       console.warn('Firestore registration sync notice:', fsErr);
     }
 
-    if (res.code === 'BACKEND_UNAVAILABLE') {
+    if (!sessionToken) {
+      sessionToken = 'token_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+    }
+
+    if (loggedInUser && sessionToken) {
+      setStoredToken(sessionToken);
+      setStoredUser(loggedInUser);
+    }
+
+    if (res.code === 'BACKEND_UNAVAILABLE' || !res.data) {
       return {
         data: {
           success: true,
-          message: `Pendaftaran akaun berjaya! Sila semak peti masuk emel (${cleanEmail}) untuk mengesahkan akaun anda.`,
+          message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
           email: cleanEmail,
           username: cleanUser,
-          requiresEmailVerification: true,
+          token: sessionToken,
+          user: loggedInUser,
         }
       };
+    }
+
+    return res;
+  },
+
+  async verifyCode(identifier: string, code: string) {
+    const cleanId = identifier.trim().toLowerCase();
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+
+    const res = await apiRequest<{
+      success: boolean;
+      message: string;
+      token?: string;
+      user?: User;
+      expiresAt?: number;
+    }>('/api/auth/verify-code', {
+      method: 'POST',
+      body: JSON.stringify({ identifier: cleanId, code: cleanCode }),
+    });
+
+    if (res.data?.user && res.data?.token) {
+      setStoredToken(res.data.token);
+      setStoredUser(res.data.user);
+      return res;
+    }
+
+    // Firestore fallback
+    try {
+      const result = await firestoreService.verifyRegistrationCode(cleanId, cleanCode);
+      if (result.success && result.user) {
+        const validUser: User = {
+          id: result.user.id,
+          username: result.user.username,
+          name: result.user.name || result.user.username,
+          email: result.user.email,
+          email_verified: true,
+          role: result.user.role || 'user',
+          status: 'approved',
+          avatar: result.user.avatar,
+          registration_code: result.user.registration_code,
+          created_at: result.user.created_at,
+          last_login: new Date().toISOString(),
+        };
+        const token = 'token_fb_code_' + Date.now();
+        setStoredToken(token);
+        setStoredUser(validUser);
+        return {
+          data: {
+            success: true,
+            message: 'Kod khas pengesahan sah! Akaun anda telah berjaya diaktifkan.',
+            token,
+            user: validUser,
+            expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000,
+          }
+        };
+      } else if (result.error) {
+        return { error: result.error };
+      }
+    } catch (e: any) {
+      console.warn('Firestore verifyRegistrationCode notice:', e);
     }
 
     return res;
@@ -462,6 +552,36 @@ export const adminApi = {
     return res;
   },
 
+  async updateRegistrationCode(userId: string, code?: string) {
+    try {
+      if (code) {
+        await firestoreService.updateUserRegistrationCode(userId, code);
+      }
+    } catch {}
+
+    const res = await apiRequest<{
+      success: boolean;
+      message: string;
+      registration_code: string;
+      user?: any;
+    }>(`/api/admin/users/${userId}/code`, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    });
+
+    if (res.code === 'BACKEND_UNAVAILABLE' && code) {
+      return {
+        data: {
+          success: true,
+          message: 'Kod pendaftaran pengguna berjaya dikemaskini.',
+          registration_code: code.trim().toUpperCase(),
+        }
+      };
+    }
+
+    return res;
+  },
+
   async verifyUserEmail(userId: string) {
     try {
       await firestoreService.setUserEmailVerified(userId, true);
@@ -589,40 +709,43 @@ export const adminApi = {
 
 // Qada Data API calls with Full Firestore Cloud Sync
 export const qadaApi = {
-  async getData() {
+  async getData(userIdParam?: string) {
     const currentUser = getStoredUser();
-    const localQada = getQadaRecord(currentUser?.id);
-    const localRecords = getDailyRecords(currentUser?.id);
-    const localSettings = getInitialSettings();
+    const activeUserId = userIdParam || currentUser?.id;
+    const localQada = getQadaRecord(activeUserId);
+    const localRecords = getDailyRecords(activeUserId);
+    const localSettings = getInitialSettings(activeUserId);
     
     // Attempt Firestore cloud sync if user is logged in
-    if (currentUser?.id) {
+    if (activeUserId) {
       try {
         const [cloudQada, cloudRecords, cloudSettings] = await Promise.all([
-          firestoreService.getQadaTarget(currentUser.id),
-          firestoreService.getDailyRecords(currentUser.id),
-          firestoreService.getUserSettings(currentUser.id),
+          firestoreService.getQadaTarget(activeUserId),
+          firestoreService.getDailyRecords(activeUserId),
+          firestoreService.getUserSettings(activeUserId),
         ]);
 
         let finalQada: QadaRecord | null = null;
         if (cloudQada && Number(cloudQada.total_required) > 0) {
           finalQada = cloudQada;
-          saveQadaRecord(finalQada, currentUser.id);
+          saveQadaRecord(finalQada, activeUserId);
         } else if (localQada && Number(localQada.total_required) > 0) {
-          // If local has target but cloud doesn't, sync local target up to cloud
+          // If local has target for this user but cloud doesn't, sync local target up to cloud
           finalQada = localQada;
-          firestoreService.saveQadaTarget(currentUser.id, localQada).catch(() => {});
+          firestoreService.saveQadaTarget(activeUserId, localQada).catch(() => {});
+        } else {
+          finalQada = null;
         }
 
         const finalRecords: DailyRecord[] = Array.isArray(cloudRecords) && cloudRecords.length > 0
           ? cloudRecords
           : (Array.isArray(localRecords) ? localRecords : []);
         
-        saveDailyRecords(finalRecords, currentUser.id);
+        saveDailyRecords(finalRecords, activeUserId);
 
         const finalSettings = cloudSettings || localSettings;
         if (finalSettings) {
-          saveSettings(finalSettings);
+          saveSettings(finalSettings, activeUserId);
         }
 
         return {

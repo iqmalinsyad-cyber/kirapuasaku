@@ -4,7 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { sendVerificationEmail, testSMTPConnection, isSMTPConfigured } from './mailer';
-import { sendNewUserRegistrationAlert, testTelegramBot, isTelegramConfigured, TelegramConfig } from './telegram';
+import { sendNewUserRegistrationAlert, sendUserActivatedAlert, testTelegramBot, isTelegramConfigured, TelegramConfig } from './telegram';
 
 // Type definitions for Server Database
 export type UserRole = 'admin' | 'user';
@@ -17,6 +17,9 @@ export interface UserRecord {
   email: string;
   email_verified: boolean;
   verification_token?: string | null;
+  registration_code?: string;
+  registration_code_used?: boolean;
+  code_type?: 'registration' | 'access';
   salt: string;
   passwordHash: string;
   role: UserRole;
@@ -24,6 +27,26 @@ export interface UserRecord {
   avatar?: string;
   created_at: string;
   last_login?: string;
+}
+
+// Generate unique Registration Code (e.g. REG-8K92X1)
+export function generateRegistrationCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = 'REG-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Generate unique Access Code (e.g. ACC-7M419B)
+export function generateAccessCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = 'ACC-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 export interface SessionRecord {
@@ -89,6 +112,7 @@ function createInitialDatabase(): DatabaseSchema {
     email: 'admin@qadatrack.app',
     email_verified: true,
     verification_token: null,
+    registration_code: 'ADMIN',
     salt: adminSalt,
     passwordHash: adminPasswordHash,
     role: 'admin',
@@ -107,6 +131,7 @@ function createInitialDatabase(): DatabaseSchema {
     email: 'ahmad@example.com',
     email_verified: true,
     verification_token: null,
+    registration_code: 'KP-1001',
     salt: sampleUserSalt,
     passwordHash: sampleUserPasswordHash,
     role: 'user',
@@ -205,6 +230,9 @@ function loadDatabase() {
           }
           if (u.email_verified === undefined) {
             u.email_verified = true;
+          }
+          if (!u.registration_code) {
+            u.registration_code = u.role === 'admin' ? 'ADMIN' : generateRegistrationCode();
           }
         });
         if (!loaded.systemSettings) {
@@ -382,9 +410,9 @@ async function startServer() {
   // AUTHENTICATION API ROUTES
   // ==========================================
 
-  // 1. Register User (New Sign Up) -> Auto-approved, Email Verification Required
+  // 1. Register User (New Sign Up) -> Pending approval, requires Admin registration code
   app.post('/api/auth/register', (req: Request, res: Response) => {
-    const { name, username, email, password, avatar } = req.body;
+    const { name, username, email, password, avatar, code } = req.body;
 
     if (!username || typeof username !== 'string' || !username.trim()) {
       return res.status(400).json({ error: 'Nama pengguna (username) wajib diisi.' });
@@ -424,25 +452,25 @@ async function startServer() {
     const salt = generateSalt();
     const passwordHash = hashPassword(password, salt);
     const userId = 'usr_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
-    const verificationToken = 'ver_' + generateToken();
+    const registrationCode = generateRegistrationCode();
 
     const displayName = (name && typeof name === 'string' && name.trim()) ? name.trim() : cleanUsername;
     const defaultAvatar = avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`;
-
-    const smtpActive = isSMTPConfigured();
-    const isAutoVerified = !smtpActive; // If SMTP not configured, auto-activate so user is never locked out
 
     const newUser: UserRecord = {
       id: userId,
       username: cleanUsername,
       name: displayName,
       email: cleanEmail,
-      email_verified: isAutoVerified, // Auto-verified if no SMTP, or pending verification if SMTP is active
-      verification_token: verificationToken,
+      email_verified: false,
+      verification_token: null,
+      registration_code: registrationCode,
+      registration_code_used: false,
+      code_type: 'registration',
       salt,
       passwordHash,
       role: 'user',
-      status: 'approved',
+      status: 'pending',
       avatar: defaultAvatar,
       created_at: new Date().toISOString(),
     };
@@ -469,49 +497,14 @@ async function startServer() {
       }
     };
 
-    // Generate Long-lived Session Token (365 days for seamless multi-device persistence)
-    const token = generateToken();
-    const now = Date.now();
-    const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
-    const expiresAt = now + SESSION_DURATION_MS;
-
-    const session: SessionRecord = {
-      token,
-      userId: newUser.id,
-      createdAt: now,
-      expiresAt,
-    };
-
-    db.sessions.push(session);
-    newUser.last_login = new Date().toISOString();
-
     saveDatabase();
 
-    // Trigger Nodemailer asynchronous dispatch if SMTP configured
-    let emailSent = false;
-    let emailError: string | null = null;
-    if (smtpActive) {
-      sendVerificationEmail(cleanEmail, cleanUsername, verificationToken)
-        .then((mailRes) => {
-          if (mailRes.success) {
-            console.log(`[SMTP Nodemailer] Verification email sent to ${cleanEmail}`);
-          } else {
-            console.warn(`[SMTP Nodemailer] Failed to send email: ${mailRes.error}`);
-          }
-        })
-        .catch((e) => {
-          console.error('[SMTP Nodemailer] Unexpected error:', e);
-        });
-    }
-
-    // Trigger Telegram notification to Admin
+    // Trigger Telegram notification to Admin with the unique code
     if (isTelegramConfigured(db.systemSettings?.telegram)) {
       sendNewUserRegistrationAlert(newUser, db.systemSettings?.telegram)
         .then((tgRes) => {
           if (tgRes.success) {
-            console.log(`[Telegram Bot] New registration alert sent to admin for @${cleanUsername}`);
-          } else {
-            console.warn(`[Telegram Bot] Alert failed: ${tgRes.error}`);
+            console.log(`[Telegram Bot] New registration alert sent to admin with code for @${cleanUsername}`);
           }
         })
         .catch((e) => console.error('[Telegram Bot] Unexpected alert error:', e));
@@ -519,26 +512,123 @@ async function startServer() {
 
     return res.status(201).json({
       success: true,
-      message: smtpActive 
-        ? `Pendaftaran berjaya! Emel pengesahan telah dihantar ke ${cleanEmail}.` 
-        : 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
-      token,
-      expiresAt,
-      email: cleanEmail,
+      requiresAdminApproval: true,
+      status: 'pending',
+      message: 'Pendaftaran akaun berjaya! Sila dapatkan Kod Khas Pengesahan daripada pihak Admin untuk mengaktifkan akaun anda.',
+      userId: newUser.id,
       username: cleanUsername,
-      requiresEmailVerification: smtpActive && !newUser.email_verified,
-      verificationToken: newUser.verification_token,
-      smtpConfigured: smtpActive,
+      email: cleanEmail,
+      name: displayName,
+      registration_code: registrationCode,
       user: {
         id: newUser.id,
         username: newUser.username,
         name: newUser.name,
         email: newUser.email,
-        email_verified: newUser.email_verified,
+        email_verified: false,
         role: newUser.role,
-        status: newUser.status,
+        status: 'pending',
         avatar: newUser.avatar,
+        registration_code: newUser.registration_code,
         created_at: newUser.created_at
+      }
+    });
+  });
+
+  // 1.1 Verify Admin Registration Code (Submitted by User)
+  app.post('/api/auth/verify-code', (req: Request, res: Response) => {
+    const { identifier, code, userId } = req.body;
+
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      return res.status(400).json({ error: 'Sila masukkan Kod Khas Pengesahan.' });
+    }
+
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+    const cleanId = (identifier || userId || '').trim().toLowerCase();
+
+    const user = db.users.find((u) => 
+      u.id === cleanId || 
+      u.username.toLowerCase() === cleanId || 
+      (u.email && u.email.toLowerCase() === cleanId)
+    );
+
+    if (!user) {
+      return res.status(404).json({ error: 'Akaun pengguna tidak dijumpai.' });
+    }
+
+    if (user.status === 'rejected') {
+      return res.status(403).json({ error: 'Akaun anda telah dinyahaktifkan oleh pihak Pentadbir.' });
+    }
+
+    // Check single-use restriction
+    if (user.registration_code_used) {
+      return res.status(400).json({
+        error: 'Kod yang dimasukkan telah digunakan atau tidak sah. Sila cuba lagi atau hubungi Admin.',
+        failed: true,
+      });
+    }
+
+    const userCode = (user.registration_code || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!userCode || cleanCode !== userCode) {
+      return res.status(400).json({
+        error: 'Kod yang dimasukkan tidak sah. Sila cuba lagi.',
+        failed: true,
+      });
+    }
+
+    // Activate user and mark code as used (single use)
+    user.status = 'approved';
+    user.email_verified = true;
+    user.registration_code_used = true;
+
+    // Generate Session Token
+    const token = generateToken();
+    const now = Date.now();
+    const SESSION_DURATION_MS = 365 * 24 * 60 * 60 * 1000;
+    const expiresAt = now + SESSION_DURATION_MS;
+
+    const session: SessionRecord = {
+      token,
+      userId: user.id,
+      createdAt: now,
+      expiresAt,
+    };
+
+    db.sessions.push(session);
+    user.last_login = new Date().toISOString();
+    saveDatabase();
+
+    // Trigger Telegram notification to Admin for code activation
+    if (isTelegramConfigured(db.systemSettings?.telegram)) {
+      sendUserActivatedAlert(user, db.systemSettings?.telegram)
+        .then((tgRes) => {
+          if (tgRes.success) {
+            console.log(`[Telegram Bot] Code activation alert sent to admin for @${user.username}`);
+          }
+        })
+        .catch((e) => console.error('[Telegram Bot] Unexpected activation alert error:', e));
+    }
+
+    return res.json({
+      success: true,
+      message: 'Alhamdulillah, akaun anda telah berjaya diaktifkan! Sila log masuk ke akaun anda.',
+      token,
+      expiresAt,
+      username: user.username,
+      email: user.email,
+      user: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        email_verified: user.email_verified,
+        role: user.role,
+        status: user.status,
+        avatar: user.avatar,
+        registration_code: user.registration_code,
+        registration_code_used: user.registration_code_used,
+        created_at: user.created_at,
+        last_login: user.last_login
       }
     });
   });
@@ -712,6 +802,18 @@ async function startServer() {
       });
     }
 
+    if (user.status === 'pending') {
+      return res.json({
+        requiresAdminApproval: true,
+        status: 'pending',
+        userId: user.id,
+        username: user.username,
+        name: user.name,
+        email: user.email,
+        message: 'Akaun anda sedang menunggu pengesahan Admin. Sila masukkan Kod Khas Pengesahan yang diberikan oleh pihak Admin untuk mengaktifkan akaun anda.',
+      });
+    }
+
     // Login Successful: Reset failed attempts
     resetFailedLogin(rateLimitKey);
 
@@ -747,6 +849,7 @@ async function startServer() {
         role: user.role,
         status: user.status,
         avatar: user.avatar,
+        registration_code: user.registration_code,
         created_at: user.created_at,
         last_login: user.last_login
       }
@@ -768,6 +871,7 @@ async function startServer() {
         role: user.role,
         status: user.status,
         avatar: user.avatar,
+        registration_code: user.registration_code,
         created_at: user.created_at,
         last_login: user.last_login
       },
@@ -890,6 +994,7 @@ async function startServer() {
         name: u.name,
         email: u.email,
         email_verified: !!u.email_verified,
+        registration_code: u.registration_code || '',
         role: u.role,
         status: u.status,
         avatar: u.avatar,
@@ -904,7 +1009,43 @@ async function startServer() {
     return res.json({ users: userList });
   });
 
-  // 7.1 Admin Verify User Email Manually
+  // 7.1 Admin Set / Regenerate User Registration Code (Admin only)
+  app.post('/api/admin/users/:userId/code', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { userId } = req.params;
+    const { code, regenerate } = req.body;
+
+    const targetUser = db.users.find((u) => u.id === userId);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Pengguna tidak dijumpai.' });
+    }
+
+    let newCode = '';
+    if (regenerate || !code || typeof code !== 'string' || !code.trim()) {
+      newCode = generateRegistrationCode();
+    } else {
+      newCode = code.trim().toUpperCase().replace(/\s+/g, '');
+    }
+
+    targetUser.registration_code = newCode;
+    targetUser.registration_code_used = false;
+    saveDatabase();
+
+    return res.json({
+      success: true,
+      message: `Kod khas pengesahan bagi pengguna "${targetUser.name}" berjaya ditetapkan kepada: ${newCode}`,
+      registration_code: newCode,
+      user: {
+        id: targetUser.id,
+        username: targetUser.username,
+        name: targetUser.name,
+        registration_code: targetUser.registration_code,
+        registration_code_used: targetUser.registration_code_used,
+        status: targetUser.status,
+      }
+    });
+  });
+
+  // 7.2 Admin Verify User Email / Approve Manually
   app.post('/api/admin/users/:userId/verify-email', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
     const { userId } = req.params;
     const targetUser = db.users.find((u) => u.id === userId);
@@ -919,12 +1060,13 @@ async function startServer() {
 
     return res.json({
       success: true,
-      message: `Emel pengguna "${targetUser.name}" telah disahkan oleh Admin secara manual.`,
+      message: `Pengguna "${targetUser.name}" telah disahkan dan diaktifkan oleh Admin secara manual.`,
       user: {
         id: targetUser.id,
         username: targetUser.username,
         email: targetUser.email,
         email_verified: targetUser.email_verified,
+        registration_code: targetUser.registration_code,
         status: targetUser.status,
       }
     });

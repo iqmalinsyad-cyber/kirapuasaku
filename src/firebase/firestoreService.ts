@@ -22,9 +22,32 @@ export interface FirestoreUserData {
   role: 'admin' | 'user';
   status: 'pending' | 'approved' | 'rejected';
   avatar?: string;
+  registration_code?: string;
+  registration_code_used?: boolean;
+  code_type?: 'registration' | 'access';
   passwordHash: string;
   created_at: string;
   last_login?: string;
+}
+
+// Generate unique Registration Code (e.g. REG-8K92X1)
+export function generateRegistrationCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = 'REG-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
+
+// Generate unique Access Code (e.g. ACC-7M419B)
+export function generateAccessCode(): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let result = 'ACC-';
+  for (let i = 0; i < 6; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
 }
 
 const USERS_COLLECTION = 'users';
@@ -154,8 +177,9 @@ export const firestoreService = {
   },
 
   // Save new user registration
-  async registerUser(userData: User, rawPassword: string): Promise<void> {
+  async registerUser(userData: User, rawPassword: string, customCode?: string): Promise<string> {
     const hashedPassword = await hashPasswordClient(rawPassword);
+    const code = customCode || userData.registration_code || generateRegistrationCode();
     const docData = cleanFirestoreData<FirestoreUserData>({
       id: userData.id,
       username: userData.username,
@@ -165,11 +189,83 @@ export const firestoreService = {
       role: userData.role || 'user',
       status: userData.status || 'pending',
       avatar: userData.avatar || '',
+      registration_code: code,
+      registration_code_used: false,
+      code_type: 'registration',
       passwordHash: hashedPassword,
       created_at: userData.created_at || new Date().toISOString(),
       last_login: userData.last_login || new Date().toISOString(),
     });
     await setDoc(doc(db, USERS_COLLECTION, userData.id), docData, { merge: true });
+    return code;
+  },
+
+  // Update User Registration / Verification Code (Admin manual setup or auto-regenerate)
+  async updateUserRegistrationCode(userId: string, newCode: string): Promise<void> {
+    const userRef = doc(db, USERS_COLLECTION, userId);
+    const cleanCode = newCode.trim().toUpperCase();
+    await updateDoc(userRef, cleanFirestoreData({
+      registration_code: cleanCode,
+      registration_code_used: false,
+      updated_at: new Date().toISOString(),
+    }));
+  },
+
+  // Verify Registration Code submitted by user (enforcing single-use)
+  async verifyRegistrationCode(identifier: string, inputCode: string): Promise<{ success: boolean; user?: FirestoreUserData; error?: string }> {
+    try {
+      const user = await this.findUserByIdentifier(identifier);
+      if (!user) {
+        return { success: false, error: 'Akaun pengguna tidak dijumpai.' };
+      }
+      if (user.status === 'rejected') {
+        return { success: false, error: 'Akaun anda telah dinyahaktifkan oleh pihak Pentadbir.' };
+      }
+      if (user.registration_code_used) {
+        return { success: false, error: 'Kod yang dimasukkan telah digunakan atau tidak sah. Sila cuba lagi atau hubungi Admin.' };
+      }
+      const cleanInput = (inputCode || '').trim().toUpperCase().replace(/\s+/g, '');
+      const userCode = (user.registration_code || '').trim().toUpperCase().replace(/\s+/g, '');
+      
+      if (!userCode || cleanInput !== userCode) {
+        return { 
+          success: false, 
+          error: 'Kod yang dimasukkan tidak sah. Sila cuba lagi.' 
+        };
+      }
+      
+      // Approve user and mark verified, mark code as used (single use)
+      const userRef = doc(db, USERS_COLLECTION, user.id);
+      await updateDoc(userRef, cleanFirestoreData({
+        status: 'approved',
+        email_verified: true,
+        registration_code_used: true,
+        updated_at: new Date().toISOString(),
+      }));
+      
+      this.sendUserActivatedAlertDirect({
+        id: user.id,
+        username: user.username,
+        name: user.name || user.username,
+        email: user.email,
+        registration_code: user.registration_code,
+        role: user.role || 'user',
+        status: 'approved',
+        created_at: user.created_at,
+      }).catch(() => {});
+
+      return {
+        success: true,
+        user: {
+          ...user,
+          status: 'approved',
+          email_verified: true,
+          registration_code_used: true,
+        }
+      };
+    } catch (e: any) {
+      return { success: false, error: e.message || 'Ralat semasa mengesahkan kod.' };
+    }
   },
 
   // Update profile
@@ -292,6 +388,7 @@ export const firestoreService = {
             role: data.role || 'user',
             status: data.status || 'approved',
             avatar: data.avatar,
+            registration_code: data.registration_code || '',
             created_at: data.created_at || new Date().toISOString(),
             last_login: data.last_login || data.created_at,
             qadaRequired,
@@ -354,8 +451,8 @@ export const firestoreService = {
 
   // Qada Target Firestore Sync
   async getQadaTarget(userId: string): Promise<QadaRecord | null> {
+    if (!userId) return null;
     try {
-      // Primary user document check
       const snap = await getDoc(doc(db, QADA_COLLECTION, userId));
       if (snap.exists()) {
         const data = snap.data();
@@ -363,23 +460,6 @@ export const firestoreService = {
           return data as QadaRecord;
         }
       }
-
-      // If user is admin, check possible admin alias documents
-      if (userId === 'usr_admin_root' || userId === 'admin_root' || userId.includes('admin')) {
-        const adminAliases = ['usr_admin_root', 'admin_root', 'user_admin_001'];
-        for (const alias of adminAliases) {
-          if (alias !== userId) {
-            const aliasSnap = await getDoc(doc(db, QADA_COLLECTION, alias)).catch(() => null);
-            if (aliasSnap && aliasSnap.exists()) {
-              const aliasData = aliasSnap.data();
-              if (aliasData && Number(aliasData.total_required) > 0) {
-                return aliasData as QadaRecord;
-              }
-            }
-          }
-        }
-      }
-
       return null;
     } catch (err) {
       console.warn('Firestore getQadaTarget err:', err);
@@ -388,6 +468,7 @@ export const firestoreService = {
   },
 
   async saveQadaTarget(userId: string, qada: QadaRecord): Promise<void> {
+    if (!userId) return;
     try {
       const payload = cleanFirestoreData({
         id: qada.id || `qada_${userId}`,
@@ -408,29 +489,13 @@ export const firestoreService = {
 
   // Daily Records Firestore Sync
   async getDailyRecords(userId: string): Promise<DailyRecord[]> {
+    if (!userId) return [];
     try {
       const snap = await getDoc(doc(db, RECORDS_COLLECTION, userId));
       if (snap.exists()) {
         const data = snap.data();
-        return data.items || [];
+        return Array.isArray(data?.items) ? data.items : [];
       }
-
-      // If user is admin, check possible admin alias documents
-      if (userId === 'usr_admin_root' || userId === 'admin_root' || userId.includes('admin')) {
-        const adminAliases = ['usr_admin_root', 'admin_root', 'user_admin_001'];
-        for (const alias of adminAliases) {
-          if (alias !== userId) {
-            const aliasSnap = await getDoc(doc(db, RECORDS_COLLECTION, alias)).catch(() => null);
-            if (aliasSnap && aliasSnap.exists()) {
-              const aliasData = aliasSnap.data();
-              if (aliasData?.items && Array.isArray(aliasData.items)) {
-                return aliasData.items;
-              }
-            }
-          }
-        }
-      }
-
       return [];
     } catch (err) {
       console.warn('Firestore getDailyRecords err:', err);
@@ -439,6 +504,7 @@ export const firestoreService = {
   },
 
   async saveDailyRecords(userId: string, records: DailyRecord[]): Promise<void> {
+    if (!userId) return;
     try {
       const cleanRecords = (records || []).map((r) => cleanFirestoreData({
         id: r.id,
@@ -460,15 +526,9 @@ export const firestoreService = {
 
   // Reset User Fasting Data in Firestore (Clears target & records)
   async resetUserData(userId: string): Promise<void> {
+    if (!userId) return;
     try {
       await deleteDoc(doc(db, QADA_COLLECTION, userId));
-      // Also clean up any legacy keys
-      const legacyKeys = ['admin_root', 'user_admin_001', 'admin', 'usr_admin_root', 'qada_admin'];
-      for (const k of legacyKeys) {
-        if (k !== userId) {
-          await deleteDoc(doc(db, QADA_COLLECTION, k)).catch(() => {});
-        }
-      }
       await setDoc(doc(db, RECORDS_COLLECTION, userId), {
         items: [],
         updated_at: new Date().toISOString(),
@@ -602,8 +662,9 @@ export const firestoreService = {
         `📧 <b>Emel:</b> ${user.email}\n` +
         `🏷️ <b>Peranan:</b> ${user.role.toUpperCase()}\n` +
         `📌 <b>Status:</b> ${user.status.toUpperCase()}\n` +
+        (user.registration_code ? `🔑 <b>Kod Pengesahan Admin:</b> <code>${user.registration_code}</code>\n` : '') +
         `📅 <b>Didaftarkan:</b> ${new Date().toLocaleString('ms-MY', { timeZone: 'Asia/Kuala_Lumpur' })}\n\n` +
-        `<i>Sila log masuk sebagai Admin untuk mengurus atau meluluskan akaun jika perlu.</i>`;
+        `<i>Sila log masuk sebagai Admin untuk mengurus kod atau meluluskan akaun jika perlu.</i>`;
 
       await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
         method: 'POST',
@@ -614,6 +675,36 @@ export const firestoreService = {
           parse_mode: 'HTML',
         }),
       }).catch((e) => console.warn('Direct telegram alert failed:', e));
+    } catch {
+      // Ignore background notification errors
+    }
+  },
+
+  // Client-Side Direct User Activated Alert Dispatch
+  async sendUserActivatedAlertDirect(user: Partial<User>): Promise<void> {
+    try {
+      const config = await this.getTelegramConfig();
+      if (!config || !config.enabled || !config.botToken || !config.adminChatId) {
+        return;
+      }
+
+      const text = `✨ <b>KiraPuasaKu: Akaun Berjaya Diaktifkan</b> 🚀\n\n` +
+        `👤 <b>Nama:</b> ${user.name || user.username}\n` +
+        `📛 <b>Username:</b> @${user.username}\n` +
+        `📧 <b>Emel:</b> ${user.email}\n` +
+        (user.registration_code ? `🔑 <b>Kod Disahkan:</b> <code>${user.registration_code}</code>\n` : '') +
+        `📅 <b>Masa Pengesahan:</b> ${new Date().toLocaleString('ms-MY', { timeZone: 'Asia/Kuala_Lumpur' })}\n` +
+        `📌 <b>Status:</b> <b>Aktif / Approved</b>`;
+
+      await fetch(`https://api.telegram.org/bot${config.botToken}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: config.adminChatId,
+          text,
+          parse_mode: 'HTML',
+        }),
+      }).catch((e) => console.warn('Direct telegram activation alert failed:', e));
     } catch {
       // Ignore background notification errors
     }

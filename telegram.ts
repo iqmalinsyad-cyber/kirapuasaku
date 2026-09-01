@@ -74,6 +74,7 @@ export async function sendNewUserRegistrationAlert(
     email: string;
     role?: string;
     status?: string;
+    registration_code?: string;
     created_at?: string;
   },
   config?: TelegramConfig
@@ -94,12 +95,47 @@ export async function sendNewUserRegistrationAlert(
 👤 <b>Nama:</b> ${escapeHtml(user.name || user.username)}
 🆔 <b>Username:</b> @${escapeHtml(user.username)}
 📧 <b>Emel:</b> ${escapeHtml(user.email)}
-📅 <b>Masa Daftar:</b> ${dateStr}
-📌 <b>Status:</b> <i>Menunggu Pengesahan / Semakan Admin</i>
+${user.registration_code ? `🔑 <b>Kod Pengesahan Admin:</b> <code>${escapeHtml(user.registration_code)}</code>\n` : ''}📅 <b>Masa Daftar:</b> ${dateStr}
+📌 <b>Status:</b> <i>Menunggu Pengesahan Kod / Semakan Admin</i>
 
 ───────────────
 💡 <b>Tindakan Pentadbir:</b>
-Sila buka Panel Pengurusan Pengguna (Admin) di aplikasi KiraPuasaKu untuk menyemak dan mengesahkan akaun ini.
+Berikan Kod Pengesahan di atas kepada pengguna, atau sahkan akaun pengguna secara terus melalui Panel Admin.
+`.trim();
+
+  return sendTelegramMessage(message, config);
+}
+
+/**
+ * Send notification when a user verifies/activates account with special code
+ */
+export async function sendUserActivatedAlert(
+  user: {
+    name?: string;
+    username: string;
+    email: string;
+    registration_code?: string;
+  },
+  config?: TelegramConfig
+): Promise<{ success: boolean; error?: string }> {
+  if (!isTelegramConfigured(config)) {
+    return { success: false, error: 'Telegram bot tidak aktif atau belum diset.' };
+  }
+
+  const dateStr = new Date().toLocaleString('ms-MY', {
+    timeZone: 'Asia/Kuala_Lumpur',
+    dateStyle: 'full',
+    timeStyle: 'medium',
+  });
+
+  const message = `
+✨ <b>KiraPuasaKu: Akaun Berjaya Diaktifkan</b> 🚀
+
+👤 <b>Nama:</b> ${escapeHtml(user.name || user.username)}
+🆔 <b>Username:</b> @${escapeHtml(user.username)}
+📧 <b>Emel:</b> ${escapeHtml(user.email)}
+${user.registration_code ? `🔑 <b>Kod Disahkan:</b> <code>${escapeHtml(user.registration_code)}</code>\n` : ''}📅 <b>Masa Pengesahan:</b> ${dateStr}
+📌 <b>Status:</b> <b>Aktif / Approved</b>
 `.trim();
 
   return sendTelegramMessage(message, config);

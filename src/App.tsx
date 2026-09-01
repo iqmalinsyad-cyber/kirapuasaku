@@ -34,9 +34,9 @@ export default function App() {
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState<boolean>(false);
 
-  // App data state
-  const [qada, setQada] = useState<QadaRecord | null>(() => getQadaRecord());
-  const [records, setRecords] = useState<DailyRecord[]>(() => getDailyRecords());
+  // App data state - Strictly isolated per user
+  const [qada, setQada] = useState<QadaRecord | null>(null);
+  const [records, setRecords] = useState<DailyRecord[]>([]);
   const [settings, setSettings] = useState<UserSettings>(() => getInitialSettings());
   const [currentTab, setCurrentTab] = useState<NavigationTab>('dashboard');
 
@@ -90,28 +90,38 @@ export default function App() {
     }
   }, [settings.theme]);
 
-  // Load User Data from Server
-  const loadUserDataFromServer = useCallback(async () => {
+  // Load User Data from Server with strict user isolation
+  const loadUserDataFromServer = useCallback(async (explicitUser?: User | null) => {
+    const activeUser = explicitUser !== undefined ? explicitUser : currentUser;
+    const uid = activeUser?.id;
+    if (!uid) return;
+
     try {
       const res = await qadaApi.getData();
       if (res.data) {
-        if (res.data.qada) {
-          setQada(res.data.qada);
-          saveQadaRecord(res.data.qada);
-        }
-        if (Array.isArray(res.data.records)) {
-          setRecords(res.data.records);
-          saveDailyRecords(res.data.records);
-        }
+        // Explicitly set null if user has not set a target yet, preventing data bleeding
+        const serverQada = res.data.qada || null;
+        setQada(serverQada);
+        saveQadaRecord(serverQada, uid);
+
+        const serverRecords = Array.isArray(res.data.records) ? res.data.records : [];
+        setRecords(serverRecords);
+        saveDailyRecords(serverRecords, uid);
+
         if (res.data.settings) {
           setSettings(res.data.settings);
-          saveSettings(res.data.settings);
+          saveSettings(res.data.settings, uid);
         }
       }
     } catch (e) {
-      console.warn('Backend sync failed, using local cache:', e);
+      console.warn('Backend sync failed, using local user cache:', e);
+      if (uid) {
+        setQada(getQadaRecord(uid));
+        setRecords(getDailyRecords(uid));
+        setSettings(getInitialSettings(uid));
+      }
     }
-  }, []);
+  }, [currentUser]);
 
   // Initial Auth Check on app load
   useEffect(() => {
@@ -125,13 +135,22 @@ export default function App() {
       try {
         const res = await authApi.getMe();
         if (res.data?.user) {
-          setCurrentUser(res.data.user);
-          await loadUserDataFromServer();
+          const user = res.data.user;
+          setCurrentUser(user);
+          setQada(getQadaRecord(user.id));
+          setRecords(getDailyRecords(user.id));
+          setSettings(getInitialSettings(user.id));
+          await loadUserDataFromServer(user);
         } else {
           setCurrentUser(null);
+          setQada(null);
+          setRecords([]);
         }
       } catch (err) {
         console.error('Failed to verify session:', err);
+        setCurrentUser(null);
+        setQada(null);
+        setRecords([]);
       } finally {
         setIsAuthChecking(false);
       }
@@ -185,7 +204,11 @@ export default function App() {
   // Handle Login Success
   const handleLoginSuccess = async (user: User, token: string) => {
     setCurrentUser(user);
-    await loadUserDataFromServer();
+    // Reset to user's isolated local records if any
+    setQada(getQadaRecord(user.id));
+    setRecords(getDailyRecords(user.id));
+    setSettings(getInitialSettings(user.id));
+    await loadUserDataFromServer(user);
   };
 
   // Handle Logout
@@ -216,10 +239,15 @@ export default function App() {
 
   // Handle Onboarding Completion
   const handleOnboardingComplete = async (newQada: QadaRecord) => {
-    saveQadaRecord(newQada);
-    setQada(newQada);
-    await qadaApi.saveTarget(newQada);
-    triggerGoogleSheetAutoSync(newQada, records, 'Tetapan Sasaran Awal');
+    const userQada: QadaRecord = {
+      ...newQada,
+      id: `qada_${currentUser?.id || Date.now()}`,
+      user_id: currentUser?.id || 'user_default',
+    };
+    saveQadaRecord(userQada, currentUser?.id);
+    setQada(userQada);
+    await qadaApi.saveTarget(userQada);
+    triggerGoogleSheetAutoSync(userQada, records, 'Tetapan Sasaran Awal');
     showToast(t.setupSuccess, 'success');
   };
 
@@ -272,7 +300,7 @@ export default function App() {
       showToast(t.recordSavedToast.replace('{days}', String(recordData.days)), 'success');
     }
 
-    saveDailyRecords(updatedRecords);
+    saveDailyRecords(updatedRecords, currentUser?.id);
     setRecords(updatedRecords);
     setIsAddModalOpen(false);
     setEditingRecord(null);
@@ -303,7 +331,7 @@ export default function App() {
   // Handle Delete Record
   const handleDeleteRecord = async (recordId: string) => {
     const updatedRecords = records.filter((r) => r.id !== recordId);
-    saveDailyRecords(updatedRecords);
+    saveDailyRecords(updatedRecords, currentUser?.id);
     setRecords(updatedRecords);
     await qadaApi.saveRecords(updatedRecords);
     triggerGoogleSheetAutoSync(qada, updatedRecords, 'Padam Rekod');
@@ -318,7 +346,7 @@ export default function App() {
       total_required: newTotal,
       updated_at: new Date().toISOString(),
     };
-    saveQadaRecord(updatedQada);
+    saveQadaRecord(updatedQada, currentUser?.id);
     setQada(updatedQada);
     await qadaApi.saveTarget(updatedQada);
     triggerGoogleSheetAutoSync(updatedQada, records, 'Kemaskini Sasaran');
@@ -338,7 +366,7 @@ export default function App() {
       created_at: qada?.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
-    saveQadaRecord(updatedQada);
+    saveQadaRecord(updatedQada, currentUser?.id);
     setQada(updatedQada);
     await qadaApi.saveTarget(updatedQada);
     triggerGoogleSheetAutoSync(updatedQada, records, 'Tetapkan Sasaran Baharu');
@@ -352,7 +380,7 @@ export default function App() {
 
   // Handle Update Settings
   const handleUpdateSettings = async (newSettings: UserSettings) => {
-    saveSettings(newSettings);
+    saveSettings(newSettings, currentUser?.id);
     setSettings(newSettings);
     if (currentUser) {
       try {
@@ -383,7 +411,7 @@ export default function App() {
 
   // Handle Reset All Data
   const handleResetAllData = async () => {
-    resetAllData();
+    resetAllData(currentUser?.id);
     setQada(null);
     setRecords([]);
     setCurrentTab('dashboard');

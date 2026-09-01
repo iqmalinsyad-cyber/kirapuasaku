@@ -3,7 +3,8 @@ import {
   Users, CheckCircle, ShieldCheck, Clock, Search, 
   Trash2, X, RefreshCw, KeyRound,
   RotateCcw, AlertTriangle, Copy, Check, Share2,
-  Mail, Send, CheckCircle2, XCircle, Info, ExternalLink, Sparkles
+  Mail, Send, CheckCircle2, XCircle, Info, ExternalLink, Sparkles,
+  Edit3, Key, Shield, Hash
 } from 'lucide-react';
 import { AdminUserItem, Language } from '../types';
 import { getTranslation } from '../translations';
@@ -31,6 +32,12 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Registration Code Management State
+  const [userToEditCode, setUserToEditCode] = useState<AdminUserItem | null>(null);
+  const [customCodeInput, setCustomCodeInput] = useState<string>('');
+  const [isUpdatingCode, setIsUpdatingCode] = useState<boolean>(false);
+  const [copiedCodeUserId, setCopiedCodeUserId] = useState<string | null>(null);
 
   // SMTP Settings & Test State
   const [smtpStatus, setSmtpStatus] = useState<{
@@ -86,10 +93,56 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
       fetchSMTPStatus();
       setUserToDelete(null);
       setUserToReset(null);
+      setUserToEditCode(null);
       setResetResult(null);
       setTestSMTPResult(null);
     }
   }, [isOpen]);
+
+  const handleCopyCode = (user: AdminUserItem) => {
+    const code = user.registration_code || 'KP-' + Math.floor(100000 + Math.random() * 900000);
+    navigator.clipboard.writeText(code);
+    setCopiedCodeUserId(user.id);
+    onShowToast(t.codeCopiedToast || `Kod khas ${code} disalin!`, 'success');
+    setTimeout(() => setCopiedCodeUserId(null), 2500);
+  };
+
+  const handleOpenEditCode = (user: AdminUserItem) => {
+    setUserToEditCode(user);
+    setCustomCodeInput(user.registration_code || ('KP-' + Math.floor(100000 + Math.random() * 900000)));
+  };
+
+  const handleAutoGenerateNewCode = (type: 'registration' | 'access' = 'registration') => {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const prefix = type === 'registration' ? 'REG-' : 'ACC-';
+    let rand = '';
+    for (let i = 0; i < 6; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setCustomCodeInput(prefix + rand);
+  };
+
+  const handleSaveCustomCode = async () => {
+    if (!userToEditCode || !customCodeInput.trim()) return;
+    setIsUpdatingCode(true);
+    const cleanCode = customCodeInput.trim().toUpperCase();
+    try {
+      const res = await adminApi.updateRegistrationCode(userToEditCode.id, cleanCode);
+      if (res.data?.success || !res.error) {
+        onShowToast(t.codeUpdateSuccessToast || `Kod khas berjaya ditukar kepada ${cleanCode}!`, 'success');
+        setUsers((prev) =>
+          prev.map((u) => (u.id === userToEditCode.id ? { ...u, registration_code: cleanCode } : u))
+        );
+        setUserToEditCode(null);
+      } else if (res.error) {
+        onShowToast(res.error, 'error');
+      }
+    } catch (e) {
+      onShowToast('Ralat mengemaskini kod pendaftaran.', 'error');
+    } finally {
+      setIsUpdatingCode(false);
+    }
+  };
 
   const handleTestSMTP = async () => {
     if (!testEmailInput || !testEmailInput.includes('@')) {
@@ -625,15 +678,57 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                       )}
                     </div>
 
-                    {/* Email address */}
-                    {u.email && (
-                      <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300 mt-0.5">
-                        ✉️ {u.email}
-                      </p>
-                    )}
+                    {/* Email address & Registration Code */}
+                    <div className="mt-0.5 space-y-1">
+                      {u.email && (
+                        <p className="text-[11px] font-medium text-stone-600 dark:text-stone-300">
+                          ✉️ {u.email}
+                        </p>
+                      )}
+
+                      {/* Special Registration Code Display for Admin */}
+                      <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                        <span className="text-[10px] font-semibold text-stone-500 dark:text-stone-400">
+                          {t.adminCodeBadge || 'Kod Khas:'}
+                        </span>
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50/90 px-2 py-0.5 dark:border-amber-700/80 dark:bg-amber-950/60 shadow-2xs">
+                          <KeyRound className="h-3 w-3 text-amber-600 dark:text-amber-400" />
+                          <span className="font-mono text-xs font-bold text-amber-900 dark:text-amber-200 tracking-wider">
+                            {u.registration_code || 'KP-100000'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyCode(u)}
+                            title={t.btnCopyCode || 'Salin Kod Khas'}
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-amber-800 hover:bg-amber-200/70 dark:text-amber-300 dark:hover:bg-amber-900 transition cursor-pointer"
+                          >
+                            {copiedCodeUserId === u.id ? (
+                              <>
+                                <Check className="h-2.5 w-2.5 text-emerald-600" />
+                                <span className="text-emerald-700 dark:text-emerald-400">Disalin</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="h-2.5 w-2.5" />
+                                <span>Salin</span>
+                              </>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditCode(u)}
+                            title={t.btnEditCode || 'Tukar Kod Khas'}
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold text-stone-700 hover:bg-amber-200/70 dark:text-stone-300 dark:hover:bg-amber-900 transition cursor-pointer"
+                          >
+                            <Edit3 className="h-2.5 w-2.5" />
+                            <span>Tukar</span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
 
                     {/* Status badge & Meta */}
-                    <div className="mt-1 flex items-center gap-2 text-[10px] text-stone-500 dark:text-stone-400 flex-wrap">
+                    <div className="mt-1.5 flex items-center gap-2 text-[10px] text-stone-500 dark:text-stone-400 flex-wrap">
                       <span
                         className={`inline-flex items-center gap-1 rounded px-2 py-0.2 text-[9px] font-bold ${
                           u.email_verified
@@ -664,7 +759,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 {/* Admin Actions */}
                 <div className="flex items-center gap-1.5 self-end sm:self-center flex-wrap">
                   
-                  {/* Manual verify email if pending */}
+                  {/* Manual verify user/code if pending */}
                   {!u.email_verified && (
                     <button
                       onClick={() => handleVerifyEmailManually(u.id)}
@@ -746,6 +841,98 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
         </div>
 
       </div>
+
+      {/* MODAL 0: EDIT / SET REGISTRATION CODE */}
+      {userToEditCode && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-stone-950/80 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900 animate-in zoom-in-95">
+            
+            <div className="flex items-start gap-3 mb-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                <KeyRound className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-stone-900 dark:text-white uppercase tracking-wider">
+                  Tetapkan Kod Khas Pendaftaran
+                </h3>
+                <p className="text-xs font-medium text-stone-500 dark:text-stone-400 mt-0.5">
+                  Pengguna: <strong className="text-stone-900 dark:text-white">{userToEditCode.name}</strong> (@{userToEditCode.username})
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 p-3.5 border border-stone-200 dark:border-stone-700/60 mb-4 space-y-3">
+              <p className="text-xs text-stone-600 dark:text-stone-300 leading-relaxed">
+                Anda boleh menetapkan sebarang kod manual mengikut kehendak anda atau klik butang jana automatik di bawah:
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold text-stone-700 dark:text-stone-300">
+                  Kod Khas Pengesahan:
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={customCodeInput}
+                    onChange={(e) => setCustomCodeInput(e.target.value.toUpperCase())}
+                    placeholder="Masukkan Kod Khas"
+                    className="flex-1 rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-mono font-bold text-stone-900 focus:border-amber-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleAutoGenerateNewCode('registration')}
+                    title="Jana Kod Pendaftaran Baharu (REG-)"
+                    className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-2.5 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200 transition cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>REG</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAutoGenerateNewCode('access')}
+                    title="Jana Kod Akses Baharu (ACC-)"
+                    className="inline-flex items-center gap-1 rounded-xl border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs font-semibold text-amber-800 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200 transition cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>ACC</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isUpdatingCode}
+                onClick={() => setUserToEditCode(null)}
+                className="rounded-xl border border-stone-200 px-3.5 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer"
+              >
+                {t.btnCancelAction}
+              </button>
+              
+              <button
+                type="button"
+                disabled={isUpdatingCode || !customCodeInput.trim()}
+                onClick={handleSaveCustomCode}
+                className="flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs transition cursor-pointer disabled:opacity-50"
+              >
+                {isUpdatingCode ? (
+                  <>
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3 w-3" />
+                    <span>Simpan Kod</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
       {/* MODAL 1: RESET PASSWORD CONFIRMATION */}
       {userToReset && (
