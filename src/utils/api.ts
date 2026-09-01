@@ -15,8 +15,13 @@ export function setStoredToken(token: string): void {
 }
 
 export function removeStoredToken(): void {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  try {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
+    localStorage.removeItem('qadatrack_user_v1');
+  } catch (e) {
+    console.warn('removeStoredToken notice:', e);
+  }
 }
 
 export function getStoredUser(): User | null {
@@ -515,11 +520,26 @@ export const authApi = {
   },
 
   async getMe() {
+    const token = getStoredToken();
+    if (!token) {
+      return { error: 'Tiada sesi dijumpai.', code: 'NO_SESSION' };
+    }
+
     const res = await apiRequest<{ user: User; session: { expiresAt: number; remainingMinutes: number } }>('/api/auth/me');
     if (res.code === 'BACKEND_UNAVAILABLE') {
       const cached = getStoredUser();
-      const token = getStoredToken();
-      if (cached && token) {
+      const currentToken = getStoredToken();
+      if (cached && currentToken) {
+        // Block unverified/pending accounts
+        if (cached.role !== 'admin' && (cached.status === 'pending' || cached.email_verified === false)) {
+          removeStoredToken();
+          return { error: 'Akaun belum disahkan.', code: 'ACCOUNT_PENDING' };
+        }
+        if (cached.status === 'rejected') {
+          removeStoredToken();
+          return { error: 'Akaun telah dinyahaktifkan.', code: 'ACCOUNT_REJECTED' };
+        }
+
         // Optionally refresh user from Firestore if online
         try {
           const fresh = await firestoreService.findUserByIdentifier(cached.id);
@@ -571,8 +591,12 @@ export const authApi = {
   },
 
   async logout() {
+    const token = getStoredToken();
+    removeStoredToken();
     try {
-      await apiRequest('/api/auth/logout', { method: 'POST' });
+      if (token) {
+        await apiRequest('/api/auth/logout', { method: 'POST' });
+      }
     } catch (e) {
       console.warn('Backend logout warning:', e);
     }
@@ -581,7 +605,6 @@ export const authApi = {
     } catch (e) {
       console.warn('Firebase signOut warning:', e);
     }
-    removeStoredToken();
   },
 
   async updateProfile(name: string, username: string, avatar?: string) {

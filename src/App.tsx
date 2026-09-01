@@ -125,15 +125,17 @@ export default function App() {
 
   // Initial Auth Check on app load
   useEffect(() => {
+    let isMounted = true;
     const checkAuth = async () => {
       const token = getStoredToken();
       if (!token) {
-        setIsAuthChecking(false);
+        if (isMounted) setIsAuthChecking(false);
         return;
       }
 
       try {
         const res = await authApi.getMe();
+        if (!isMounted) return;
         if (res.data?.user) {
           const user = res.data.user;
           setCurrentUser(user);
@@ -142,22 +144,31 @@ export default function App() {
           setSettings(getInitialSettings(user.id));
           await loadUserDataFromServer(user);
         } else {
+          removeStoredToken();
           setCurrentUser(null);
           setQada(null);
           setRecords([]);
         }
       } catch (err) {
         console.error('Failed to verify session:', err);
-        setCurrentUser(null);
-        setQada(null);
-        setRecords([]);
+        if (isMounted) {
+          removeStoredToken();
+          setCurrentUser(null);
+          setQada(null);
+          setRecords([]);
+        }
       } finally {
-        setIsAuthChecking(false);
+        if (isMounted) {
+          setIsAuthChecking(false);
+        }
       }
     };
 
     checkAuth();
-  }, [loadUserDataFromServer]);
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Run strictly once on mount
 
   // Real-Time Multi-Device Synchronization (Window focus & Periodic Polling)
   useEffect(() => {
@@ -213,12 +224,10 @@ export default function App() {
 
   // Handle Logout
   const handleLogout = useCallback(async (reason?: string) => {
-    try {
-      await authApi.logout();
-    } catch (err) {
-      console.warn('Logout warning caught safely:', err);
-    }
+    // 1. Immediately wipe local auth storage synchronously to prevent race conditions
     removeStoredToken();
+
+    // 2. Reset user state immediately so view transitions to AuthView cleanly
     setCurrentUser(null);
     setQada(null);
     setRecords([]);
@@ -229,6 +238,14 @@ export default function App() {
     setIsShareModalOpen(false);
     setEditingRecord(null);
     setCurrentTab('dashboard');
+
+    // 3. Complete server & firebase signOut in background
+    try {
+      await authApi.logout();
+    } catch (err) {
+      console.warn('Logout cleanup notice:', err);
+    }
+
     const msg = reason || (settings.language === 'ms' ? 'Anda telah log keluar.' : 'You have logged out.');
     showToast(msg, 'info');
   }, [settings.language, showToast]);
