@@ -8,7 +8,7 @@ import {
 } from './utils/storage';
 import { getTranslation } from './translations';
 import { getTodayDateString } from './utils/date';
-import { authApi, qadaApi, getStoredToken } from './utils/api';
+import { authApi, qadaApi, getStoredToken, removeStoredToken } from './utils/api';
 import { syncToGoogleSheetWebhook } from './utils/googleSheets';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
@@ -213,10 +213,22 @@ export default function App() {
 
   // Handle Logout
   const handleLogout = useCallback(async (reason?: string) => {
-    await authApi.logout();
+    try {
+      await authApi.logout();
+    } catch (err) {
+      console.warn('Logout warning caught safely:', err);
+    }
+    removeStoredToken();
     setCurrentUser(null);
     setQada(null);
     setRecords([]);
+    setIsAdminModalOpen(false);
+    setIsAddModalOpen(false);
+    setIsCelebrationOpen(false);
+    setIsSetNewTargetOpen(false);
+    setIsShareModalOpen(false);
+    setEditingRecord(null);
+    setCurrentTab('dashboard');
     const msg = reason || (settings.language === 'ms' ? 'Anda telah log keluar.' : 'You have logged out.');
     showToast(msg, 'info');
   }, [settings.language, showToast]);
@@ -459,7 +471,7 @@ export default function App() {
     showToast(`ðŸŒ™ ${message}`, 'success');
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
-        new Notification('í ¼í¼™ KiraPuasaKu Peringatan', {
+        new Notification('ðŸŒ™ KiraPuasaKu Peringatan', {
           body: message,
           icon: '/favicon.ico',
         });

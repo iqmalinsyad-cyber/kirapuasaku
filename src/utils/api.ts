@@ -546,7 +546,16 @@ export const authApi = {
   },
 
   async logout() {
-    await apiRequest('/api/auth/logout', { method: 'POST' });
+    try {
+      await apiRequest('/api/auth/logout', { method: 'POST' });
+    } catch (e) {
+      console.warn('Backend logout warning:', e);
+    }
+    try {
+      await firebaseAuthService.signOut();
+    } catch (e) {
+      console.warn('Firebase signOut warning:', e);
+    }
     removeStoredToken();
   },
 

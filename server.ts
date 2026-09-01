@@ -1082,12 +1082,22 @@ async function startServer() {
     });
   });
 
-  // 4. Logout (verifyToken)
-  app.post('/api/auth/logout', verifyToken, (req: AuthenticatedRequest, res: Response) => {
-    const token = req.session!.token;
-    db.sessions = db.sessions.filter((s) => s.token !== token);
-    saveDatabase();
-    return res.json({ success: true, message: 'Log keluar berjaya.' });
+  // 4. Logout (Graceful logout for all tokens and users)
+  app.post('/api/auth/logout', (req: Request, res: Response) => {
+    try {
+      const authHeader = req.headers.authorization;
+      if (authHeader) {
+        const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
+        if (token) {
+          db.sessions = db.sessions.filter((s) => s.token !== token);
+          saveDatabase();
+        }
+      }
+      return res.json({ success: true, message: 'Log keluar berjaya.' });
+    } catch (err) {
+      console.warn('Logout server error handled safely:', err);
+      return res.json({ success: true, message: 'Log keluar selesai.' });
+    }
   });
 
   // ==========================================

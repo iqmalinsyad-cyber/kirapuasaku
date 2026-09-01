@@ -216,5 +216,18 @@ export const firebaseAuthService = {
       console.error('verifyUserDirectlyInFirestore error:', err);
       return false;
     }
+  },
+
+  /**
+   * Sign out current user from Firebase Auth
+   */
+  async signOut(): Promise<void> {
+    try {
+      if (auth.currentUser) {
+        await signOut(auth);
+      }
+    } catch (err) {
+      console.warn('Firebase signOut notice:', err);
+    }
   }
 };
