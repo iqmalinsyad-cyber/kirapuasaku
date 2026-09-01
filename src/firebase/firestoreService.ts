@@ -589,7 +589,11 @@ export const firestoreService = {
   // Update user status by admin
   async setUserStatus(userId: string, status: 'pending' | 'approved' | 'rejected'): Promise<void> {
     const userRef = doc(db, USERS_COLLECTION, userId);
-    await updateDoc(userRef, cleanFirestoreData({ status }));
+    await updateDoc(userRef, cleanFirestoreData({ 
+      status,
+      email_verified: status === 'approved' ? true : false,
+      updated_at: new Date().toISOString()
+    }));
   },
 
   // Verify email by admin

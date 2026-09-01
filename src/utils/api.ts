@@ -33,11 +33,7 @@ export function setStoredUser(user: User): void {
   localStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-// Generic API fetch wrapper that injects Bearer token with quick timeout for static fallbacks
-export async function apiRequest<T = any>(
-  endpoint: string,
-  options: RequestInit = {}
-): Promise<{ 
+export interface ApiResponse<T = any> {
   data?: T; 
   error?: string; 
   locked?: boolean; 
@@ -46,7 +42,15 @@ export async function apiRequest<T = any>(
   email?: string;
   username?: string;
   verificationToken?: string;
-}> {
+  status?: string;
+  requiresAdminApproval?: boolean;
+}
+
+// Generic API fetch wrapper that injects Bearer token with quick timeout for static fallbacks
+export async function apiRequest<T = any>(
+  endpoint: string,
+  options: RequestInit = {}
+): Promise<ApiResponse<T>> {
   const token = getStoredToken();
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -107,7 +111,18 @@ export async function apiRequest<T = any>(
 
 // Authentication API calls with Firebase Cloud Sync
 export const authApi = {
-  async register(username: string, email: string, password: string, avatar?: string, name?: string) {
+  async register(username: string, email: string, password: string, avatar?: string, name?: string): Promise<ApiResponse<{
+    success: boolean;
+    message: string;
+    email: string;
+    username: string;
+    registration_code?: string;
+    requiresAdminApproval?: boolean;
+    status?: string;
+    token?: string;
+    expiresAt?: number;
+    user?: User;
+  }>> {
     const cleanUser = username.trim().toLowerCase();
     const cleanEmail = email.trim().toLowerCase();
     const displayName = (name && name.trim()) || cleanUser;
@@ -118,7 +133,9 @@ export const authApi = {
       message: string;
       email: string;
       username: string;
-      requiresEmailVerification?: boolean;
+      registration_code?: string;
+      requiresAdminApproval?: boolean;
+      status?: string;
       token?: string;
       expiresAt?: number;
       user?: User;
@@ -127,10 +144,13 @@ export const authApi = {
       body: JSON.stringify({ username: cleanUser, email: cleanEmail, password, avatar: defaultAvatar, name: displayName }),
     });
 
-    let loggedInUser: User | undefined = res.data?.user;
-    let sessionToken: string | undefined = res.data?.token;
+    if (res.error) {
+      return res;
+    }
 
-    // Also register in Firestore for cross-device synchronization
+    const registeredCode = (res.data as any)?.registration_code || (res.data?.user as any)?.registration_code;
+
+    // Also register in Firestore as pending for cross-device synchronization
     try {
       await firestoreService.ensureAdminExists();
       const existing = await firestoreService.findUserByIdentifier(cleanUser) || 
@@ -138,62 +158,36 @@ export const authApi = {
 
       if (!existing) {
         const newUser: User = {
-          id: loggedInUser?.id || ('usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+          id: res.data?.user?.id || ('usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
           username: cleanUser,
           name: displayName,
           email: cleanEmail,
-          email_verified: true,
+          email_verified: false,
           role: 'user',
-          status: 'approved',
+          status: 'pending',
           avatar: defaultAvatar,
+          registration_code: registeredCode,
           created_at: new Date().toISOString(),
           last_login: new Date().toISOString(),
         };
-        await firestoreService.registerUser(newUser, password);
+        await firestoreService.registerUser(newUser, password, registeredCode);
         firestoreService.sendNewUserRegistrationAlertDirect(newUser).catch(() => {});
-        if (!loggedInUser) loggedInUser = newUser;
-      } else {
-        if (!loggedInUser) {
-          loggedInUser = {
-            id: existing.id,
-            username: existing.username,
-            name: existing.name || existing.username,
-            email: existing.email,
-            email_verified: true,
-            role: existing.role || 'user',
-            status: 'approved',
-            avatar: existing.avatar || defaultAvatar,
-            created_at: existing.created_at,
-          };
-        }
       }
     } catch (fsErr) {
       console.warn('Firestore registration sync notice:', fsErr);
     }
 
-    if (!sessionToken) {
-      sessionToken = 'token_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
-    }
-
-    if (loggedInUser && sessionToken) {
-      setStoredToken(sessionToken);
-      setStoredUser(loggedInUser);
-    }
-
-    if (res.code === 'BACKEND_UNAVAILABLE' || !res.data) {
-      return {
-        data: {
-          success: true,
-          message: 'Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.',
-          email: cleanEmail,
-          username: cleanUser,
-          token: sessionToken,
-          user: loggedInUser,
-        }
-      };
-    }
-
-    return res;
+    // User is in pending status until Admin gives code or approves - do NOT set stored token
+    return {
+      data: {
+        success: true,
+        message: 'Pendaftaran akaun berjaya direkodkan! Sila dapatkan Kod Khas daripada pihak Admin untuk mengaktifkan akaun anda.',
+        email: cleanEmail,
+        username: cleanUser,
+        registration_code: registeredCode,
+        status: 'pending',
+      }
+    };
   },
 
   async verifyCode(identifier: string, code: string) {
@@ -415,12 +409,42 @@ export const authApi = {
     }
   },
 
-  async login(username: string, password: string) {
+  async login(username: string, password: string): Promise<ApiResponse<{ 
+    token?: string; 
+    user?: User; 
+    expiresAt?: number; 
+    verificationToken?: string; 
+    email?: string; 
+    code?: string;
+    status?: string;
+    requiresAdminApproval?: boolean;
+    username?: string;
+  }>> {
     const cleanUser = username.trim().toLowerCase();
-    const res = await apiRequest<{ token: string; user: User; expiresAt: number; verificationToken?: string; email?: string; code?: string }>('/api/auth/login', {
+    const res = await apiRequest<{ 
+      token?: string; 
+      user?: User; 
+      expiresAt?: number; 
+      verificationToken?: string; 
+      email?: string; 
+      code?: string;
+      status?: string;
+      requiresAdminApproval?: boolean;
+      username?: string;
+    }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ username: cleanUser, password }),
     });
+
+    if (res.code === 'ACCOUNT_PENDING_VERIFICATION' || (res.data as any)?.status === 'pending' || (res.data as any)?.requiresAdminApproval) {
+      return {
+        error: res.error || 'Akaun anda masih dalam status menunggu kelulusan / Kod Akses daripada pihak Admin sebelum boleh log masuk.',
+        code: 'ACCOUNT_PENDING_VERIFICATION',
+        status: 'pending',
+        username: (res.data as any)?.username || cleanUser,
+        email: (res.data as any)?.email,
+      };
+    }
 
     if (res.data?.token && res.data?.user) {
       setStoredToken(res.data.token);
@@ -437,11 +461,12 @@ export const authApi = {
         // Verify Password against Firestore (supports new password & master admin fallback)
         const isPasswordValid = await firestoreService.verifyPassword(firestoreUser.passwordHash, password, firestoreUser.role);
         if (isPasswordValid) {
-          // Check if email verification is required
-          if (firestoreUser.role !== 'admin' && firestoreUser.email_verified === false) {
+          // Block pending user from login
+          if (firestoreUser.role !== 'admin' && (firestoreUser.status === 'pending' || firestoreUser.email_verified === false)) {
             return {
-              error: 'Alamat emel anda belum disahkan. Sila semak peti masuk emel anda dan klik pautan pengesahan.',
-              code: 'EMAIL_NOT_VERIFIED',
+              error: 'Akaun anda masih dalam status menunggu kelulusan / Kod Akses daripada pihak Admin sebelum boleh log masuk.',
+              code: 'ACCOUNT_PENDING_VERIFICATION',
+              status: 'pending',
               email: firestoreUser.email,
               username: firestoreUser.username,
             };

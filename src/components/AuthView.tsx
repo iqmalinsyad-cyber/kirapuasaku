@@ -349,7 +349,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
       if (res.error) {
         setErrorMessage(res.error);
         onShowToast(res.error, 'error');
-      } else if (res.data?.user && res.data?.token && res.data.user.email_verified) {
+      } else if (res.data?.user && res.data?.token && (res.data.user as any).email_verified && (res.data.user as any).status === 'approved') {
         onShowToast(
           language === 'ms' 
             ? `Pendaftaran akaun berjaya! Selamat datang ke KiraPuasaKu.` 
@@ -990,7 +990,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                         required
                         value={accessCodeInput}
                         onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
-                        placeholder={t.placeholderAccessCode || 'XXX-XXXXXX'}
+                        placeholder={t.placeholderAccessCode || (language === 'ms' ? 'Masukkan kod yang diterima' : 'Enter received code')}
                         autoCapitalize="characters"
                         autoCorrect="off"
                         className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-mono font-bold tracking-wider text-amber-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-amber-200 dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"

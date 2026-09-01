@@ -1002,15 +1002,15 @@ async function startServer() {
       });
     }
 
-    if (user.status === 'pending') {
-      return res.json({
-        requiresAdminApproval: true,
+    if (user.role !== 'admin' && (user.status === 'pending' || user.email_verified === false)) {
+      return res.status(403).json({
+        error: 'Akaun anda masih dalam status menunggu kelulusan / Kod Akses daripada pihak Admin sebelum boleh log masuk.',
+        code: 'ACCOUNT_PENDING_VERIFICATION',
         status: 'pending',
         userId: user.id,
         username: user.username,
         name: user.name,
         email: user.email,
-        message: 'Akaun anda sedang menunggu pengesahan Admin. Sila masukkan Kod Khas Pengesahan yang diberikan oleh pihak Admin untuk mengaktifkan akaun anda.',
       });
     }
 
