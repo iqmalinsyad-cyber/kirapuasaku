@@ -212,13 +212,48 @@ export default function App() {
   };
 
   // Handle Logout
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async (reason?: string) => {
     await authApi.logout();
     setCurrentUser(null);
     setQada(null);
     setRecords([]);
-    showToast(settings.language === 'ms' ? 'Anda telah log keluar.' : 'You have logged out.', 'info');
-  };
+    const msg = reason || (settings.language === 'ms' ? 'Anda telah log keluar.' : 'You have logged out.');
+    showToast(msg, 'info');
+  }, [settings.language, showToast]);
+
+  // Inactivity Auto-Logout after 30 minutes
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
+    let inactivityTimer: NodeJS.Timeout;
+
+    const resetInactivityTimer = () => {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        handleLogout(
+          settings.language === 'ms'
+            ? 'Sesi anda telah tamat selepas 30 minit tanpa aktiviti. Sila log masuk semula.'
+            : 'Session expired after 30 minutes of inactivity. Please sign in again.'
+        );
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    const userActivityEvents = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    userActivityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, resetInactivityTimer, { passive: true });
+    });
+
+    // Start timer initially
+    resetInactivityTimer();
+
+    return () => {
+      clearTimeout(inactivityTimer);
+      userActivityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, resetInactivityTimer);
+      });
+    };
+  }, [currentUser, handleLogout, settings.language]);
 
   // Background auto-sync to Google Sheets Database
   const triggerGoogleSheetAutoSync = (
@@ -424,7 +459,7 @@ export default function App() {
     showToast(`ðŸŒ™ ${message}`, 'success');
     if ('Notification' in window && Notification.permission === 'granted') {
       try {
-        new Notification('ðŸŒ™ KiraPuasaKu Peringatan', {
+        new Notification('í ¼í¼™ KiraPuasaKu Peringatan', {
           body: message,
           icon: '/favicon.ico',
         });

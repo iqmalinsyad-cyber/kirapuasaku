@@ -27,13 +27,36 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 }) => {
   const t = getTranslation(language);
 
-  const [activeMainTab, setActiveMainTab] = useState<'users' | 'smtp'>('users');
+  const [activeMainTab, setActiveMainTab] = useState<'users' | 'accessCodes' | 'smtp'>('users');
   const [users, setUsers] = useState<AdminUserItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [filterStatus, setFilterStatus] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Registration Code Management State
+  // Access Codes Management State (Akses dengan Kod)
+  const [accessCodes, setAccessCodes] = useState<Array<{
+    id: string;
+    code: string;
+    is_used: boolean;
+    used_by_user_id?: string;
+    used_by_username?: string;
+    used_at?: string;
+    notes?: string;
+    created_at: string;
+  }>>([]);
+  const [isLoadingCodes, setIsLoadingCodes] = useState<boolean>(false);
+  const [newAccessCodeInput, setNewAccessCodeInput] = useState<string>('');
+  const [newAccessCodeNotes, setNewAccessCodeNotes] = useState<string>('');
+  const [isCreatingAccessCode, setIsCreatingAccessCode] = useState<boolean>(false);
+  const [copiedAccessCodeId, setCopiedAccessCodeId] = useState<string | null>(null);
+
+  // Fasting Target Edit State
+  const [userToEditTarget, setUserToEditTarget] = useState<AdminUserItem | null>(null);
+  const [targetRequiredInput, setTargetRequiredInput] = useState<number>(0);
+  const [targetCompletedInput, setTargetCompletedInput] = useState<number>(0);
+  const [isUpdatingTarget, setIsUpdatingTarget] = useState<boolean>(false);
+
+  // Registration Code Management State (REG codes)
   const [userToEditCode, setUserToEditCode] = useState<AdminUserItem | null>(null);
   const [customCodeInput, setCustomCodeInput] = useState<string>('');
   const [isUpdatingCode, setIsUpdatingCode] = useState<boolean>(false);
@@ -76,6 +99,20 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
     }
   };
 
+  const fetchAccessCodes = async () => {
+    setIsLoadingCodes(true);
+    try {
+      const res = await adminApi.getAccessCodes();
+      if (res.data?.accessCodes) {
+        setAccessCodes(res.data.accessCodes);
+      }
+    } catch (e) {
+      console.warn('Could not fetch access codes', e);
+    } finally {
+      setIsLoadingCodes(false);
+    }
+  };
+
   const fetchSMTPStatus = async () => {
     try {
       const res = await adminApi.getSMTPStatus();
@@ -90,14 +127,114 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchUsers();
+      fetchAccessCodes();
       fetchSMTPStatus();
       setUserToDelete(null);
       setUserToReset(null);
       setUserToEditCode(null);
+      setUserToEditTarget(null);
       setResetResult(null);
       setTestSMTPResult(null);
     }
   }, [isOpen]);
+
+  const handleGenerateRandomAccessCode = () => {
+    const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+    let rand = '';
+    for (let i = 0; i < 6; i++) {
+      rand += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setNewAccessCodeInput('ACC-' + rand);
+  };
+
+  const handleCreateAccessCode = async () => {
+    let code = newAccessCodeInput.trim().toUpperCase();
+    if (!code) {
+      const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      let rand = '';
+      for (let i = 0; i < 6; i++) {
+        rand += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      code = 'ACC-' + rand;
+    }
+
+    setIsCreatingAccessCode(true);
+    try {
+      const res = await adminApi.createAccessCode(code, newAccessCodeNotes.trim());
+      if (res.data?.accessCode) {
+        onShowToast(`Kod Akses ${code} berjaya dijana!`, 'success');
+        setAccessCodes((prev) => [res.data.accessCode, ...prev]);
+        setNewAccessCodeInput('');
+        setNewAccessCodeNotes('');
+      } else if (res.error) {
+        onShowToast(res.error, 'error');
+      }
+    } catch (e: any) {
+      onShowToast('Ralat menjana kod akses.', 'error');
+    } finally {
+      setIsCreatingAccessCode(false);
+    }
+  };
+
+  const handleDeleteAccessCode = async (codeId: string) => {
+    try {
+      const res = await adminApi.deleteAccessCode(codeId);
+      if (res.data?.success || !res.error) {
+        onShowToast('Kod akses berjaya dipadam.', 'success');
+        setAccessCodes((prev) => prev.filter((c) => c.id !== codeId));
+      } else if (res.error) {
+        onShowToast(res.error, 'error');
+      }
+    } catch (e) {
+      onShowToast('Ralat memadam kod akses.', 'error');
+    }
+  };
+
+  const handleCopyAccessCode = (codeStr: string, codeId: string) => {
+    navigator.clipboard.writeText(codeStr);
+    setCopiedAccessCodeId(codeId);
+    onShowToast(`Kod akses ${codeStr} disalin!`, 'success');
+    setTimeout(() => setCopiedAccessCodeId(null), 2500);
+  };
+
+  const handleOpenEditTarget = (user: AdminUserItem) => {
+    setUserToEditTarget(user);
+    setTargetRequiredInput(user.qadaRequired || 0);
+    setTargetCompletedInput(user.qadaCompleted || 0);
+  };
+
+  const handleSaveTarget = async () => {
+    if (!userToEditTarget) return;
+    setIsUpdatingTarget(true);
+    try {
+      const res = await adminApi.updateUserTarget(
+        userToEditTarget.id,
+        Number(targetRequiredInput),
+        Number(targetCompletedInput)
+      );
+      if (res.data?.success || !res.error) {
+        onShowToast('Sasaran puasa pengguna berjaya dikemaskini!', 'success');
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === userToEditTarget.id
+              ? {
+                  ...u,
+                  qadaRequired: Number(targetRequiredInput),
+                  qadaCompleted: Number(targetCompletedInput),
+                }
+              : u
+          )
+        );
+        setUserToEditTarget(null);
+      } else if (res.error) {
+        onShowToast(res.error, 'error');
+      }
+    } catch (e) {
+      onShowToast('Ralat mengemaskini sasaran puasa pengguna.', 'error');
+    } finally {
+      setIsUpdatingTarget(false);
+    }
+  };
 
   const handleCopyCode = (user: AdminUserItem) => {
     const code = user.registration_code || 'KP-' + Math.floor(100000 + Math.random() * 900000);
@@ -293,7 +430,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Top Navigation between Users & SMTP */}
+            {/* Top Navigation between Users, Access Codes & SMTP */}
             <div className="flex rounded-xl bg-stone-200/80 p-0.5 dark:bg-stone-800">
               <button
                 type="button"
@@ -307,6 +444,26 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 <Users className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Pengguna</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveMainTab('accessCodes');
+                  fetchAccessCodes();
+                }}
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold transition cursor-pointer ${
+                  activeMainTab === 'accessCodes'
+                    ? 'bg-amber-600 text-white shadow-2xs'
+                    : 'text-stone-600 hover:text-stone-900 dark:text-stone-400'
+                }`}
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>{language === 'ms' ? 'Kod Akses' : 'Access Codes'}</span>
+                <span className="rounded-full bg-amber-200/60 dark:bg-amber-900/80 text-amber-950 dark:text-amber-200 px-1.5 py-0.2 text-[9px] font-mono">
+                  {accessCodes.length}
+                </span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
@@ -320,7 +477,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 }`}
               >
                 <Mail className="h-3.5 w-3.5" />
-                <span>SMTP Gmail</span>
+                <span>{language === 'ms' ? 'Emel / SMTP' : 'Email / SMTP'}</span>
                 {smtpStatus?.configured && (
                   <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 )}
@@ -336,7 +493,181 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
           </div>
         </div>
 
-        {activeMainTab === 'smtp' ? (
+        {activeMainTab === 'accessCodes' ? (
+          /* ACCESS CODES GENERATOR & MANAGEMENT VIEW */
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+            
+            {/* Generate New Access Code Card */}
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 sm:p-5 dark:border-amber-900/60 dark:bg-amber-950/30 space-y-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 font-bold text-amber-950 dark:text-amber-100 text-sm">
+                  <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span>{language === 'ms' ? 'Jana Kod Akses Baharu' : 'Generate New Access Code'}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGenerateRandomAccessCode}
+                  className="inline-flex items-center gap-1 rounded-xl bg-white dark:bg-stone-900 border border-amber-300 dark:border-amber-700 px-2.5 py-1 text-xs font-bold text-amber-800 dark:text-amber-200 shadow-2xs hover:bg-amber-100/50 cursor-pointer"
+                >
+                  <RefreshCw className="h-3 w-3" />
+                  <span>{language === 'ms' ? 'Jana Kod Rawak' : 'Generate Random Code'}</span>
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1">
+                    {language === 'ms' ? 'Kod Akses:' : 'Access Code:'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newAccessCodeInput}
+                    onChange={(e) => setNewAccessCodeInput(e.target.value.toUpperCase())}
+                    placeholder={language === 'ms' ? "Contoh: ACC-9K82L1 (atau klik 'Jana Kod Rawak')" : "e.g. ACC-9K82L1 (or click 'Generate Random Code')"}
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-mono font-bold text-stone-900 focus:border-amber-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1">
+                    {language === 'ms' ? 'Catatan / Nama Penerima (Pilihan):' : 'Notes / Recipient Name (Optional):'}
+                  </label>
+                  <input
+                    type="text"
+                    value={newAccessCodeNotes}
+                    onChange={(e) => setNewAccessCodeNotes(e.target.value)}
+                    placeholder={language === 'ms' ? 'cth: Ustaz Azhar / Ahli Kariah 1' : 'e.g. Ustaz Azhar / Member 1'}
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-xs font-medium text-stone-900 focus:border-amber-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  disabled={isCreatingAccessCode}
+                  onClick={handleCreateAccessCode}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 px-4 py-2 text-xs font-bold text-white shadow-md shadow-amber-600/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isCreatingAccessCode ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>{language === 'ms' ? 'Sedang Menjana...' : 'Generating...'}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="h-3.5 w-3.5" />
+                      <span>{language === 'ms' ? 'Simpan & Aktifkan Kod Akses' : 'Save & Activate Access Code'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* List of Access Codes */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-bold text-stone-800 dark:text-stone-200 uppercase tracking-wider">
+                  {language === 'ms' ? `Senarai Kod Akses Yang Dijana (${accessCodes.length})` : `Generated Access Codes (${accessCodes.length})`}
+                </h3>
+                <button
+                  type="button"
+                  onClick={fetchAccessCodes}
+                  disabled={isLoadingCodes}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white cursor-pointer"
+                >
+                  <RefreshCw className={`h-3 w-3 ${isLoadingCodes ? 'animate-spin' : ''}`} />
+                  <span>{language === 'ms' ? 'Muat Semula' : 'Refresh'}</span>
+                </button>
+              </div>
+
+              {accessCodes.length === 0 ? (
+                <div className="text-center py-10 rounded-2xl border border-stone-200 bg-stone-50/50 dark:border-stone-800 dark:bg-stone-900/30 text-stone-400">
+                  <KeyRound className="mx-auto h-8 w-8 stroke-[1.5] mb-2 opacity-50 text-amber-500" />
+                  <p className="text-xs font-medium">{language === 'ms' ? 'Belum ada kod akses yang dijana.' : 'No access codes generated yet.'}</p>
+                  <p className="text-[11px] text-stone-500 mt-0.5">{language === 'ms' ? 'Klik butang di atas untuk menjana kod akses baharu bagi pengguna.' : 'Click the button above to generate a new access code for users.'}</p>
+                </div>
+              ) : (
+                accessCodes.map((c) => (
+                  <div
+                    key={c.id}
+                    className={`rounded-xl border p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 ${
+                      c.is_used
+                        ? 'border-stone-200/80 bg-stone-100/60 dark:border-stone-800 dark:bg-stone-900/40 opacity-70'
+                        : 'border-amber-300/80 bg-amber-50/40 dark:border-amber-800 dark:bg-amber-950/20 shadow-2xs'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl font-bold ${
+                        c.is_used
+                          ? 'bg-stone-200 text-stone-600 dark:bg-stone-800 dark:text-stone-400'
+                          : 'bg-amber-500 text-white shadow-xs shadow-amber-500/30'
+                      }`}>
+                        <KeyRound className="h-4 w-4" />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-extrabold text-stone-900 dark:text-white tracking-wider">
+                            {c.code}
+                          </span>
+                          <span className={`inline-flex items-center gap-1 rounded px-2 py-0.2 text-[9px] font-bold ${
+                            c.is_used
+                              ? 'bg-stone-200 text-stone-700 dark:bg-stone-800 dark:text-stone-300'
+                              : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                          }`}>
+                            {c.is_used ? (language === 'ms' ? 'Telah Digunakan' : 'Used') : (language === 'ms' ? 'Aktif / Belum Diguna' : 'Active / Unused')}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-stone-500 dark:text-stone-400 mt-0.5 space-x-2">
+                          {c.notes && <span className="font-semibold text-stone-700 dark:text-stone-300">{language === 'ms' ? 'Catatan:' : 'Notes:'} {c.notes} •</span>}
+                          {c.is_used && c.used_by_username ? (
+                            <span className="text-stone-600 dark:text-stone-400">
+                              {language === 'ms' ? 'Diguna oleh:' : 'Used by:'} <strong className="font-mono">@{c.used_by_username}</strong>
+                            </span>
+                          ) : (
+                            <span>{language === 'ms' ? 'Dijana:' : 'Created:'} {new Date(c.created_at).toLocaleDateString(language === 'ms' ? 'ms-MY' : 'en-US')}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => handleCopyAccessCode(c.code, c.id)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-white dark:bg-stone-800 border border-stone-200 dark:border-stone-700 px-2.5 py-1 text-[11px] font-bold text-stone-700 dark:text-stone-200 hover:bg-stone-50 cursor-pointer shadow-2xs"
+                      >
+                        {copiedAccessCodeId === c.id ? (
+                          <>
+                            <Check className="h-3 w-3 text-emerald-600" />
+                            <span className="text-emerald-600">{language === 'ms' ? 'Disalin' : 'Copied'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="h-3 w-3" />
+                            <span>{language === 'ms' ? 'Salin Kod' : 'Copy Code'}</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAccessCode(c.id)}
+                        title="Padam Kod Akses"
+                        className="rounded-lg border border-rose-200 bg-rose-50/70 p-1.5 text-rose-600 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-400 transition cursor-pointer"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+          </div>
+        ) : activeMainTab === 'smtp' ? (
           /* SMTP GMAIL / RESEND API / NODEMAILER VIEW */
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
             
@@ -744,14 +1075,33 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 
                       <span>•</span>
                       <span>Daftar: {new Date(u.created_at).toLocaleDateString(language === 'ms' ? 'ms-MY' : 'en-US')}</span>
-                      {u.qadaRequired ? (
+                      {u.qadaRequired !== undefined ? (
                         <>
                           <span>•</span>
                           <span className="font-semibold text-emerald-700 dark:text-emerald-400 font-mono">
                             Qada: {u.qadaCompleted || 0} / {u.qadaRequired} {t.daysUnit}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditTarget(u)}
+                            title="Kemaskini Sasaran Puasa Pengguna"
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/60 dark:text-emerald-300 dark:hover:bg-emerald-800 transition cursor-pointer"
+                          >
+                            <Edit3 className="h-2.5 w-2.5" />
+                            <span>Edit Target</span>
+                          </button>
                         </>
-                      ) : null}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditTarget(u)}
+                          title="Tetapkan Sasaran Puasa Pengguna"
+                          className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[9px] font-bold text-stone-700 bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:text-stone-300 dark:hover:bg-stone-700 transition cursor-pointer"
+                        >
+                          <Edit3 className="h-2.5 w-2.5" />
+                          <span>+ Set Target</span>
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1052,6 +1402,87 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                   <>
                     <Trash2 className="h-3 w-3" />
                     <span>{t.btnConfirmDelete}</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: EDIT USER TARGET (Sasaran Puasa) */}
+      {userToEditTarget && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-stone-950/80 p-4 backdrop-blur-xs animate-in fade-in">
+          <div className="relative w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl dark:border-stone-800 dark:bg-stone-900 animate-in zoom-in-95">
+            
+            <div className="flex items-start gap-3 mb-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 border border-emerald-300 dark:border-emerald-700">
+                <Edit3 className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="text-xs font-bold text-stone-900 dark:text-white uppercase tracking-wider">
+                  Kemaskini Sasaran Puasa
+                </h3>
+                <p className="text-xs font-medium text-stone-500 dark:text-stone-400 mt-0.5">
+                  Pengguna: <strong className="text-stone-900 dark:text-white">{userToEditTarget.name}</strong> (@{userToEditTarget.username})
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl bg-stone-50 dark:bg-stone-800/60 p-3.5 border border-stone-200 dark:border-stone-700/60 mb-4 space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1">
+                  Jumlah Hari Qada Perlu Diganti (Sasaran):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={targetRequiredInput}
+                  onChange={(e) => setTargetRequiredInput(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold font-mono text-stone-900 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-stone-700 dark:text-stone-300 mb-1">
+                  Jumlah Hari Qada Telah Selesai:
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  value={targetCompletedInput}
+                  onChange={(e) => setTargetCompletedInput(Math.max(0, parseInt(e.target.value) || 0))}
+                  className="w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-xs font-bold font-mono text-emerald-700 focus:border-emerald-600 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-emerald-400"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                disabled={isUpdatingTarget}
+                onClick={() => setUserToEditTarget(null)}
+                className="rounded-xl border border-stone-200 px-3.5 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50 dark:border-stone-700 dark:text-stone-300 dark:hover:bg-stone-800 transition cursor-pointer"
+              >
+                {t.btnCancelAction}
+              </button>
+              
+              <button
+                type="button"
+                disabled={isUpdatingTarget}
+                onClick={handleSaveTarget}
+                className="flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-600 px-3.5 py-1.5 text-xs font-bold text-white shadow-2xs transition cursor-pointer disabled:opacity-50"
+              >
+                {isUpdatingTarget ? (
+                  <>
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-3 w-3" />
+                    <span>Simpan Sasaran</span>
                   </>
                 )}
               </button>

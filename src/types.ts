@@ -87,3 +87,15 @@ export interface UserSettings {
 }
 
 export type NavigationTab = 'dashboard' | 'record' | 'calendar' | 'progress' | 'history' | 'settings';
+
+export interface AccessCodeItem {
+  id: string;
+  code: string;
+  is_used: boolean;
+  notes?: string;
+  created_at: string;
+  created_by?: string;
+  used_at?: string | null;
+  used_by_username?: string | null;
+  used_by_email?: string | null;
+}

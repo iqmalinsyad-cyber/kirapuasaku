@@ -1,4 +1,4 @@
-import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem } from '../types';
+import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem, AccessCodeItem } from '../types';
 import { getQadaRecord, getDailyRecords, getInitialSettings, saveQadaRecord, saveDailyRecords, saveSettings } from './storage';
 import { firestoreService } from '../firebase/firestoreService';
 import { firebaseAuthService } from '../firebase/authService';
@@ -251,6 +251,102 @@ export const authApi = {
       }
     } catch (e: any) {
       console.warn('Firestore verifyRegistrationCode notice:', e);
+    }
+
+    return res;
+  },
+
+  async verifyAccessCode(code: string) {
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+
+    // Try backend first
+    const res = await apiRequest<{ success: boolean; valid: boolean; code: string; message: string }>('/api/auth/verify-access-code', {
+      method: 'POST',
+      body: JSON.stringify({ code: cleanCode }),
+    });
+
+    if (res.data?.success) {
+      return res;
+    }
+
+    // Fallback/sync to Firestore
+    try {
+      const fsResult = await firestoreService.verifyAccessCode(cleanCode);
+      if (fsResult.valid) {
+        return {
+          data: {
+            success: true,
+            valid: true,
+            code: cleanCode,
+            message: 'Kod akses sah! Sila lengkapkan maklumat pendaftaran anda.',
+          }
+        };
+      } else if (fsResult.error) {
+        return { error: fsResult.error };
+      }
+    } catch (e: any) {
+      console.warn('Firestore verifyAccessCode notice:', e);
+    }
+
+    return res;
+  },
+
+  async registerWithCode(data: { code: string; name: string; username: string; email: string; password: string; avatar?: string }) {
+    const cleanUser = data.username.trim().toLowerCase();
+    const cleanEmail = data.email.trim().toLowerCase();
+    const cleanCode = data.code.trim().toUpperCase().replace(/\s+/g, '');
+    const displayName = (data.name && data.name.trim()) || cleanUser;
+    const defaultAvatar = data.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUser)}`;
+
+    const res = await apiRequest<{
+      success: boolean;
+      message: string;
+      username: string;
+      email: string;
+      user?: User;
+    }>('/api/auth/register-with-code', {
+      method: 'POST',
+      body: JSON.stringify({
+        code: cleanCode,
+        name: displayName,
+        username: cleanUser,
+        email: cleanEmail,
+        password: data.password,
+        avatar: defaultAvatar,
+      }),
+    });
+
+    // Also redeem and register in Firestore
+    try {
+      await firestoreService.redeemAccessCode(cleanCode, cleanUser, cleanEmail);
+      const newUser: User = {
+        id: res.data?.user?.id || ('usr_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+        username: cleanUser,
+        name: displayName,
+        email: cleanEmail,
+        email_verified: true,
+        role: 'user',
+        status: 'approved',
+        avatar: defaultAvatar,
+        registration_code: cleanCode,
+        created_at: new Date().toISOString(),
+        last_login: new Date().toISOString(),
+      };
+      await firestoreService.registerUser(newUser, data.password);
+      firestoreService.sendNewUserRegistrationAlertDirect(newUser).catch(() => {});
+    } catch (e: any) {
+      console.warn('Firestore registerWithCode notice:', e);
+    }
+
+    if (res.code === 'BACKEND_UNAVAILABLE' || !res.data) {
+      return {
+        data: {
+          success: true,
+          message: 'Pendaftaran dengan Kod Akses berjaya! Sila log masuk ke akaun anda.',
+          username: cleanUser,
+          email: cleanEmail,
+        }
+      };
     }
 
     return res;
@@ -703,6 +799,129 @@ export const adminApi = {
     }>('/api/admin/telegram-test', {
       method: 'POST',
       body: JSON.stringify({ botToken, adminChatId }),
+    });
+  },
+
+  async getAccessCodes() {
+    try {
+      const fsCodes = await firestoreService.getAllAccessCodes();
+      if (fsCodes && fsCodes.length > 0) {
+        return { data: { accessCodes: fsCodes } };
+      }
+    } catch (e) {
+      console.warn('Firestore getAccessCodes notice:', e);
+    }
+
+    const res = await apiRequest<{ accessCodes: AccessCodeItem[] }>('/api/admin/access-codes');
+    if (res.code === 'BACKEND_UNAVAILABLE' || res.error) {
+      try {
+        const fsCodes = await firestoreService.getAllAccessCodes();
+        return { data: { accessCodes: fsCodes } };
+      } catch (e: any) {
+        return { data: { accessCodes: [] } };
+      }
+    }
+    return res;
+  },
+
+  async createAccessCode(code?: string, notes?: string) {
+    try {
+      const fsCode = await firestoreService.createAccessCode(code, notes);
+      if (fsCode) {
+        // Also call backend
+        apiRequest('/api/admin/access-codes', {
+          method: 'POST',
+          body: JSON.stringify({ code: fsCode.code, notes }),
+        }).catch(() => {});
+
+        return {
+          data: {
+            success: true,
+            message: `Kod akses "${fsCode.code}" berjaya dijana!`,
+            accessCode: fsCode,
+          }
+        };
+      }
+    } catch (e: any) {
+      console.warn('Firestore createAccessCode notice:', e);
+    }
+
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      accessCode: AccessCodeItem;
+    }>('/api/admin/access-codes', {
+      method: 'POST',
+      body: JSON.stringify({ code, notes }),
+    });
+  },
+
+  async updateAccessCode(id: string, code: string, notes?: string) {
+    try {
+      await firestoreService.updateAccessCode(id, code, notes);
+    } catch (e) {
+      console.warn('Firestore updateAccessCode notice:', e);
+    }
+
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      accessCode: AccessCodeItem;
+    }>(`/api/admin/access-codes/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ code, notes }),
+    });
+  },
+
+  async deleteAccessCode(id: string) {
+    try {
+      await firestoreService.deleteAccessCode(id);
+    } catch (e) {
+      console.warn('Firestore deleteAccessCode notice:', e);
+    }
+
+    return apiRequest<{
+      success: boolean;
+      message: string;
+    }>(`/api/admin/access-codes/${id}`, {
+      method: 'DELETE',
+    });
+  },
+
+  async updateUserTarget(userId: string, total_required: number, total_completed?: number) {
+    try {
+      const currentTarget = await firestoreService.getQadaTarget(userId);
+      const cleanTotal = Math.max(1, Number(total_required) || 1);
+      const cleanCompleted = total_completed !== undefined ? Math.max(0, Number(total_completed)) : (currentTarget?.total_completed || 0);
+      const updated: QadaRecord = currentTarget ? {
+        ...currentTarget,
+        total_required: cleanTotal,
+        total_completed: cleanCompleted,
+        remaining: Math.max(0, cleanTotal - cleanCompleted),
+        updated_at: new Date().toISOString(),
+      } : {
+        id: `qada_${userId}`,
+        user_id: userId,
+        total_required: cleanTotal,
+        total_completed: cleanCompleted,
+        remaining: Math.max(0, cleanTotal - cleanCompleted),
+        year: '1447H / 2026',
+        notes: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      await firestoreService.saveQadaTarget(userId, updated);
+    } catch (e) {
+      console.warn('Firestore updateUserTarget notice:', e);
+    }
+
+    return apiRequest<{
+      success: boolean;
+      message: string;
+      qada: any;
+    }>(`/api/admin/users/${userId}/target`, {
+      method: 'POST',
+      body: JSON.stringify({ total_required, total_completed }),
     });
   },
 };

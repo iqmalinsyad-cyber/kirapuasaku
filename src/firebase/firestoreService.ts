@@ -11,7 +11,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { db } from './config';
-import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem } from '../types';
+import { User, QadaRecord, DailyRecord, UserSettings, AdminUserItem, AccessCodeItem } from '../types';
 
 export interface FirestoreUserData {
   id: string;
@@ -55,6 +55,7 @@ const QADA_COLLECTION = 'qada_records';
 const RECORDS_COLLECTION = 'daily_records';
 const SETTINGS_COLLECTION = 'user_settings';
 const SYSTEM_SETTINGS_COLLECTION = 'system_settings';
+const ACCESS_CODES_COLLECTION = 'access_codes';
 
 export interface TelegramFirestoreConfig {
   botToken?: string;
@@ -354,24 +355,30 @@ export const firestoreService = {
       const list: AdminUserItem[] = await Promise.all(
         snaps.docs.map(async (d) => {
           const data = d.data() as FirestoreUserData;
+          const targetId = data.id || d.id;
           let qadaRequired = 0;
           let qadaCompleted = 0;
           let recordsCount = 0;
 
           try {
-            const [qadaSnap, recordsSnap] = await Promise.all([
-              getDoc(doc(db, QADA_COLLECTION, data.id)).catch(() => null),
-              getDoc(doc(db, RECORDS_COLLECTION, data.id)).catch(() => null),
+            // Check multiple potential doc ID keys to ensure 100% accuracy
+            const [qadaSnap1, qadaSnap2, recordsSnap1, recordsSnap2] = await Promise.all([
+              getDoc(doc(db, QADA_COLLECTION, targetId)).catch(() => null),
+              d.id !== targetId ? getDoc(doc(db, QADA_COLLECTION, d.id)).catch(() => null) : null,
+              getDoc(doc(db, RECORDS_COLLECTION, targetId)).catch(() => null),
+              d.id !== targetId ? getDoc(doc(db, RECORDS_COLLECTION, d.id)).catch(() => null) : null,
             ]);
 
-            if (qadaSnap && qadaSnap.exists()) {
-              const qData = qadaSnap.data() as QadaRecord;
-              qadaRequired = qData.total_required || 0;
+            const activeQadaSnap = (qadaSnap1 && qadaSnap1.exists()) ? qadaSnap1 : ((qadaSnap2 && qadaSnap2.exists()) ? qadaSnap2 : null);
+            if (activeQadaSnap && activeQadaSnap.exists()) {
+              const qData = activeQadaSnap.data() as QadaRecord;
+              qadaRequired = Number(qData.total_required) || 0;
             }
 
-            if (recordsSnap && recordsSnap.exists()) {
-              const recData = recordsSnap.data();
-              const items: DailyRecord[] = recData.items || [];
+            const activeRecordsSnap = (recordsSnap1 && recordsSnap1.exists()) ? recordsSnap1 : ((recordsSnap2 && recordsSnap2.exists()) ? recordsSnap2 : null);
+            if (activeRecordsSnap && activeRecordsSnap.exists()) {
+              const recData = activeRecordsSnap.data();
+              const items: DailyRecord[] = Array.isArray(recData.items) ? recData.items : [];
               recordsCount = items.length;
               qadaCompleted = items.reduce((sum, r) => sum + (Number(r.days) || 0), 0);
             }
@@ -380,15 +387,17 @@ export const firestoreService = {
           }
 
           return {
-            id: data.id,
-            username: data.username,
-            name: data.name || data.username,
-            email: data.email,
+            id: targetId,
+            username: data.username || targetId,
+            name: data.name || data.username || targetId,
+            email: data.email || '',
             email_verified: !!data.email_verified,
             role: data.role || 'user',
             status: data.status || 'approved',
             avatar: data.avatar,
             registration_code: data.registration_code || '',
+            registration_code_used: !!data.registration_code_used,
+            code_type: data.code_type,
             created_at: data.created_at || new Date().toISOString(),
             last_login: data.last_login || data.created_at,
             qadaRequired,
@@ -402,6 +411,178 @@ export const firestoreService = {
     } catch (err) {
       console.error('Firestore getAllUsers error:', err);
       return [];
+    }
+  },
+
+  // Admin update user's Qada target
+  async updateUserQadaTargetAdmin(userId: string, newTotalRequired: number): Promise<void> {
+    if (!userId) return;
+    const cleanTotal = Math.max(1, Number(newTotalRequired) || 1);
+    const docRef = doc(db, QADA_COLLECTION, userId);
+    const existing = await getDoc(docRef).catch(() => null);
+    
+    if (existing && existing.exists()) {
+      await updateDoc(docRef, cleanFirestoreData({
+        total_required: cleanTotal,
+        updated_at: new Date().toISOString(),
+      }));
+    } else {
+      await setDoc(docRef, cleanFirestoreData({
+        id: `qada_${userId}`,
+        user_id: userId,
+        total_required: cleanTotal,
+        total_completed: 0,
+        remaining: cleanTotal,
+        year: new Date().getFullYear().toString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }), { merge: true });
+    }
+  },
+
+  // ==========================================
+  // ACCESS CODES MANAGEMENT (Akses dengan Kod)
+  // ==========================================
+
+  // Get all access codes (Admin)
+  async getAllAccessCodes(): Promise<AccessCodeItem[]> {
+    try {
+      const snaps = await getDocs(collection(db, ACCESS_CODES_COLLECTION));
+      const list: AccessCodeItem[] = [];
+      snaps.forEach((d) => {
+        const data = d.data();
+        list.push({
+          id: d.id,
+          code: data.code || d.id,
+          is_used: !!data.is_used,
+          notes: data.notes || '',
+          created_at: data.created_at || new Date().toISOString(),
+          created_by: data.created_by || 'admin',
+          used_at: data.used_at || null,
+          used_by_username: data.used_by_username || null,
+          used_by_email: data.used_by_email || null,
+        });
+      });
+      return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    } catch (err) {
+      console.warn('Firestore getAllAccessCodes error:', err);
+      return [];
+    }
+  },
+
+  // Create new access code (Admin)
+  async createAccessCode(customCode?: string, notes?: string, adminUsername?: string): Promise<AccessCodeItem> {
+    const rawCode = (customCode && customCode.trim()) ? customCode.trim().toUpperCase() : generateAccessCode();
+    const cleanCode = rawCode.replace(/\s+/g, '');
+    const codeId = cleanCode.toLowerCase();
+    
+    const item: AccessCodeItem = {
+      id: codeId,
+      code: cleanCode,
+      is_used: false,
+      notes: notes?.trim() || '',
+      created_at: new Date().toISOString(),
+      created_by: adminUsername || 'admin',
+      used_at: null,
+      used_by_username: null,
+      used_by_email: null,
+    };
+
+    await setDoc(doc(db, ACCESS_CODES_COLLECTION, codeId), cleanFirestoreData(item), { merge: true });
+    return item;
+  },
+
+  // Update access code (Admin)
+  async updateAccessCode(id: string, newCode: string, notes?: string): Promise<void> {
+    const cleanCode = newCode.trim().toUpperCase().replace(/\s+/g, '');
+    const cleanId = id.trim().toLowerCase();
+    const docRef = doc(db, ACCESS_CODES_COLLECTION, cleanId);
+    await updateDoc(docRef, cleanFirestoreData({
+      code: cleanCode,
+      notes: notes !== undefined ? notes.trim() : undefined,
+      updated_at: new Date().toISOString(),
+    }));
+  },
+
+  // Delete access code (Admin)
+  async deleteAccessCode(id: string): Promise<void> {
+    const cleanId = id.trim().toLowerCase();
+    await deleteDoc(doc(db, ACCESS_CODES_COLLECTION, cleanId));
+  },
+
+  // Verify access code validity (User)
+  async verifyAccessCode(inputCode: string): Promise<{ valid: boolean; codeItem?: AccessCodeItem; error?: string }> {
+    try {
+      const cleanInput = (inputCode || '').trim().toUpperCase().replace(/\s+/g, '');
+      if (!cleanInput) {
+        return { valid: false, error: 'Sila masukkan kod akses.' };
+      }
+
+      // 1. Direct doc lookup by lowercase code ID
+      const directRef = doc(db, ACCESS_CODES_COLLECTION, cleanInput.toLowerCase());
+      const directSnap = await getDoc(directRef).catch(() => null);
+
+      if (directSnap && directSnap.exists()) {
+        const item = directSnap.data() as AccessCodeItem;
+        if (item.is_used) {
+          return { valid: false, error: 'Kod akses ini telah digunakan. Sila dapatkan kod baharu daripada Admin.' };
+        }
+        return { valid: true, codeItem: item };
+      }
+
+      // 2. Query by code field
+      const q = query(collection(db, ACCESS_CODES_COLLECTION), where('code', '==', cleanInput), limit(1));
+      const querySnaps = await getDocs(q).catch(() => null);
+
+      if (querySnaps && !querySnaps.empty) {
+        const item = querySnaps.docs[0].data() as AccessCodeItem;
+        if (item.is_used) {
+          return { valid: false, error: 'Kod akses ini telah digunakan. Sila dapatkan kod baharu daripada Admin.' };
+        }
+        return { valid: true, codeItem: item };
+      }
+
+      return { valid: false, error: 'Kod akses tidak sah atau tidak dijumpai dalam sistem. Sila semak semula atau hubungi Admin.' };
+    } catch (err: any) {
+      return { valid: false, error: err.message || 'Ralat semasa menyemak kod akses.' };
+    }
+  },
+
+  // Redeem / Consume access code when user finishes registration (Akses dengan Kod)
+  async redeemAccessCode(code: string, username: string, email: string): Promise<boolean> {
+    try {
+      const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+      const codeId = cleanCode.toLowerCase();
+      
+      const docRef = doc(db, ACCESS_CODES_COLLECTION, codeId);
+      const snap = await getDoc(docRef).catch(() => null);
+      
+      if (snap && snap.exists()) {
+        await updateDoc(docRef, cleanFirestoreData({
+          is_used: true,
+          used_at: new Date().toISOString(),
+          used_by_username: username.trim().toLowerCase(),
+          used_by_email: email.trim().toLowerCase(),
+        }));
+        return true;
+      }
+
+      const q = query(collection(db, ACCESS_CODES_COLLECTION), where('code', '==', cleanCode), limit(1));
+      const querySnaps = await getDocs(q).catch(() => null);
+      if (querySnaps && !querySnaps.empty) {
+        await updateDoc(querySnaps.docs[0].ref, cleanFirestoreData({
+          is_used: true,
+          used_at: new Date().toISOString(),
+          used_by_username: username.trim().toLowerCase(),
+          used_by_email: email.trim().toLowerCase(),
+        }));
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      console.warn('Firestore redeemAccessCode notice:', err);
+      return false;
     }
   },
 

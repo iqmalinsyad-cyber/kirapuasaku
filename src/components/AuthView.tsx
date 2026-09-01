@@ -25,7 +25,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
 }) => {
   const t = getTranslation(language);
 
-  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'verifyCode'>('login');
+  const [activeTab, setActiveTab] = useState<'login' | 'register' | 'verifyCode' | 'accessCode'>('login');
   
   // Login form fields (allows username OR email)
   const [loginIdentifier, setLoginIdentifier] = useState<string>('');
@@ -40,7 +40,16 @@ export const AuthView: React.FC<AuthViewProps> = ({
   const [showRegPassword, setShowRegPassword] = useState<boolean>(false);
   const [selectedAvatar, setSelectedAvatar] = useState<string>(MUSLIM_AVATARS[0].dataUrl);
 
-  // Special Code Verification fields
+  // Akses dengan Kod fields
+  const [accessCodeInput, setAccessCodeInput] = useState<string>('');
+  const [isAccessCodeVerified, setIsAccessCodeVerified] = useState<boolean>(false);
+  const [verifiedCodeData, setVerifiedCodeData] = useState<{ code: string; notes?: string } | null>(null);
+  const [accUsername, setAccUsername] = useState<string>('');
+  const [accEmail, setAccEmail] = useState<string>('');
+  const [accPassword, setAccPassword] = useState<string>('');
+  const [showAccPassword, setShowAccPassword] = useState<boolean>(false);
+
+  // Special Code Verification fields (Pendaftaran Akaun Baharu step 2)
   const [codeIdentifier, setCodeIdentifier] = useState<string>('');
   const [verificationCodeInput, setVerificationCodeInput] = useState<string>('');
   const [registeredUserInfo, setRegisteredUserInfo] = useState<{
@@ -101,10 +110,130 @@ export const AuthView: React.FC<AuthViewProps> = ({
   }, [language, onShowToast]);
 
   // Switch tabs
-  const handleTabSwitch = (tab: 'login' | 'register' | 'verifyCode') => {
+  const handleTabSwitch = (tab: 'login' | 'register' | 'verifyCode' | 'accessCode') => {
     setActiveTab(tab);
     setErrorMessage('');
     setEmailVerifiedSuccess(false);
+  };
+
+  // Handle Verify Access Code (Step 1 of Akses dengan Kod)
+  const handleVerifyAccessCodeStep = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    const cleanCode = accessCodeInput.trim().toUpperCase().replace(/\s+/g, '');
+
+    if (!cleanCode) {
+      setErrorMessage(
+        language === 'ms'
+          ? 'Sila masukkan Kod Akses yang sah.'
+          : 'Please enter a valid Access Code.'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await authApi.verifyAccessCode(cleanCode);
+      if (res.error) {
+        setErrorMessage(res.error);
+        onShowToast(res.error, 'error');
+      } else if (res.data?.valid) {
+        setIsAccessCodeVerified(true);
+        setVerifiedCodeData({
+          code: cleanCode,
+        });
+        onShowToast(
+          language === 'ms'
+            ? 'Kod akses sah! Sila lengkapkan maklumat akaun anda.'
+            : 'Access code verified! Please complete your account details.',
+          'success'
+        );
+      }
+    } catch (err: any) {
+      const errText = language === 'ms'
+        ? 'Kod akses tidak sah atau telah digunakan.'
+        : 'Access code is invalid or already used.';
+      setErrorMessage(errText);
+      onShowToast(errText, 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Register with Access Code (Step 2 of Akses dengan Kod)
+  const handleRegisterWithAccessCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage('');
+    const cleanUser = accUsername.trim().toLowerCase();
+    const cleanMail = accEmail.trim().toLowerCase();
+    const cleanCode = accessCodeInput.trim().toUpperCase().replace(/\s+/g, '');
+
+    if (!cleanUser || cleanUser.length < 3) {
+      setErrorMessage(
+        language === 'ms' 
+          ? 'Username mestilah sekurang-kurangnya 3 aksara.' 
+          : 'Username must be at least 3 characters.'
+      );
+      return;
+    }
+
+    if (!cleanMail || !cleanMail.includes('@') || !cleanMail.includes('.')) {
+      setErrorMessage(
+        language === 'ms' 
+          ? 'Sila masukkan alamat emel yang sah.' 
+          : 'Please enter a valid email address.'
+      );
+      return;
+    }
+
+    if (accPassword.length < 6) {
+      setErrorMessage(
+        language === 'ms' 
+          ? 'Kata laluan mestilah sekurang-kurangnya 6 aksara.' 
+          : 'Password must be at least 6 characters.'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const res = await authApi.registerWithCode({
+        code: cleanCode,
+        name: cleanUser,
+        username: cleanUser,
+        email: cleanMail,
+        password: accPassword,
+        avatar: selectedAvatar,
+      });
+
+      if (res.error) {
+        setErrorMessage(res.error);
+        onShowToast(res.error, 'error');
+      } else {
+        onShowToast(
+          language === 'ms'
+            ? 'Pendaftaran berjaya! Akaun anda telah aktif. Sila log masuk.'
+            : 'Registration successful! Your account is active. Please sign in.',
+          'success'
+        );
+        setEmailVerifiedSuccess(true);
+        setLoginIdentifier(cleanUser);
+        setIsAccessCodeVerified(false);
+        setAccessCodeInput('');
+        setAccUsername('');
+        setAccEmail('');
+        setAccPassword('');
+        setActiveTab('login');
+      }
+    } catch (err: any) {
+      setErrorMessage(
+        language === 'ms'
+          ? 'Ralat pendaftaran dengan kod akses, sila cuba lagi.'
+          : 'Registration error with access code, please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Handle Login
@@ -326,14 +455,14 @@ export const AuthView: React.FC<AuthViewProps> = ({
       {/* Main Authentication Card */}
       <div className="overflow-hidden rounded-3xl border border-stone-200/90 bg-white/95 backdrop-blur-md shadow-xl shadow-stone-200/50 dark:border-stone-800/90 dark:bg-stone-900/95 dark:shadow-black/40 transition-colors">
         
-        {/* Segmented Tab Switcher - 2 Tabs (Log Masuk & Daftar Akaun). Special code verification is hidden and appears upon registration or click. */}
+        {/* Segmented Tab Switcher - 2 Tabs (Log Masuk & Daftar Akaun). Special code / Access code verification is hidden and appears when user clicks "verify code here" */}
         <div className="p-2 sm:p-2.5 bg-stone-100/70 dark:bg-stone-950/60 border-b border-stone-200/70 dark:border-stone-800/80">
-          {activeTab === 'verifyCode' ? (
+          {activeTab === 'verifyCode' || activeTab === 'accessCode' ? (
             <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 dark:bg-amber-950/40 rounded-2xl border border-amber-300/40 dark:border-amber-700/40">
               <div className="flex items-center gap-2">
                 <KeyRound className="h-4 w-4 text-amber-600 dark:text-amber-400" />
                 <span className="text-xs font-bold text-amber-950 dark:text-amber-100">
-                  {t.codeVerificationTitle || 'Pengesahan Kod Khas Admin'}
+                  {t.accessCodeTitle || (language === 'ms' ? 'Akses dengan Kod Khas' : 'Access with Special Code')}
                 </span>
               </div>
               <button
@@ -341,7 +470,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 onClick={() => handleTabSwitch('login')}
                 className="text-xs font-semibold text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-white transition flex items-center gap-1 cursor-pointer"
               >
-                ← {t.btnLogin}
+                ← {t.backToLogin || (language === 'ms' ? 'Log Masuk' : 'Sign In')}
               </button>
             </div>
           ) : (
@@ -357,7 +486,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 }`}
               >
                 <UserIcon className="h-3.5 w-3.5" />
-                <span>{t.tabLogin}</span>
+                <span className="truncate">{t.tabLogin}</span>
               </button>
 
               <button
@@ -371,7 +500,7 @@ export const AuthView: React.FC<AuthViewProps> = ({
                 }`}
               >
                 <Sparkles className="h-3.5 w-3.5" />
-                <span>{t.tabRegister}</span>
+                <span className="truncate">{t.tabRegister}</span>
               </button>
             </div>
           )}
@@ -518,13 +647,13 @@ export const AuthView: React.FC<AuthViewProps> = ({
                   </button>
                 </p>
                 <p className="text-xs text-stone-500 dark:text-stone-400">
-                  {language === 'ms' ? 'Ada Kod Khas daripada Admin?' : 'Have a special Admin code?'}{' '}
+                  {t.haveAdminCodePrompt || (language === 'ms' ? 'Ada Kod Khas daripada Admin?' : 'Have a special Admin code?')}{' '}
                   <button
                     type="button"
-                    onClick={() => handleTabSwitch('verifyCode')}
+                    onClick={() => handleTabSwitch('accessCode')}
                     className="font-bold text-amber-600 hover:underline dark:text-amber-400 cursor-pointer"
                   >
-                    {language === 'ms' ? 'Sahkan kod di sini' : 'Verify code here'}
+                    {t.verifyCodeHereLink || (language === 'ms' ? 'Sahkan kod di sini' : 'Verify code here')}
                   </button>
                 </p>
               </div>
@@ -824,6 +953,229 @@ export const AuthView: React.FC<AuthViewProps> = ({
               </div>
 
             </form>
+          )}
+
+          {/* FORM 4: AKSES DENGAN KOD (Step 1: Masukkan Kod -> Verify & Activate -> Step 2: Isi Maklumat User -> Masuk Page Log Masuk) */}
+          {activeTab === 'accessCode' && (
+            <div className="space-y-4">
+              
+              {!isAccessCodeVerified ? (
+                /* STEP 1: Masukkan Kod Akses & Sahkan */
+                <form onSubmit={handleVerifyAccessCodeStep} className="space-y-4">
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 dark:border-amber-800 dark:bg-amber-950/40 text-amber-900 dark:text-amber-200">
+                    <div className="flex items-start gap-2.5">
+                      <KeyRound className="h-5 w-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                      <div className="text-xs space-y-1">
+                        <p className="font-bold text-xs sm:text-sm text-amber-950 dark:text-amber-100">
+                          {t.accessCodeTitle || (language === 'ms' ? 'Akses dengan Kod Khas' : 'Access with Special Code')}
+                        </p>
+                        <p className="leading-relaxed text-stone-700 dark:text-stone-300 text-[11px]">
+                          {t.accessCodeDesc || (language === 'ms' ? 'Masukkan Kod Akses unik yang anda peroleh daripada Admin untuk mengaktifkan pendaftaran anda secara terus.' : 'Enter the unique Access Code provided by the Admin to directly activate and create your account.')}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                      {t.labelAdminAccessCode || (language === 'ms' ? 'Kod Akses Admin' : 'Admin Access Code')} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                        <KeyRound className="h-4 w-4" />
+                      </div>
+                      <input
+                        id="access-code-input-field"
+                        type="text"
+                        required
+                        value={accessCodeInput}
+                        onChange={(e) => setAccessCodeInput(e.target.value.toUpperCase())}
+                        placeholder={t.placeholderAccessCode || 'ACC-XXXXXX'}
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-mono font-bold tracking-wider text-amber-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-amber-200 dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                      />
+                    </div>
+                    <p className="text-[10px] text-stone-500 dark:text-stone-400">
+                      {t.accessCodeHint || (language === 'ms' ? '*Setiap kod akses adalah berbeza dan unik untuk setiap pengguna.' : '*Each access code is distinct and unique per user.')}
+                    </p>
+                  </div>
+
+                  <button
+                    id="verify-access-code-btn"
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full flex items-center justify-center gap-2 rounded-2xl bg-amber-600 hover:bg-amber-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-amber-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer"
+                  >
+                    {isLoading ? (
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>{t.btnVerifyingAccessCode || (language === 'ms' ? 'Mengesahkan Kod...' : 'Verifying Code...')}</span>
+                      </span>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="h-4 w-4" />
+                        <span>{t.btnVerifyAccessCodeStep || (language === 'ms' ? 'Sahkan & Aktifkan Akaun' : 'Verify & Activate Account')}</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Hubungi Admin */}
+                  <div className="pt-3 border-t border-stone-200/80 dark:border-stone-800 space-y-2.5">
+                    <p className="text-[11px] font-semibold text-center text-stone-600 dark:text-stone-400">
+                      {t.accessCodeHelpContact || (language === 'ms' ? 'Untuk bantuan mendapatkan kod akses, hubungi Admin:' : 'For assistance in obtaining an access code, contact Admin:')}
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <a
+                        id="btn-email-admin-access"
+                        href="mailto:iqmalinsyad@gmail.com?subject=Permohonan%20Kod%20Akses%20KiraPuasaKu&body=Salam%20Admin%20Iqmal,%20saya%20ingin%20memohon%20kod%20akses%20bagi%20pendaftaran%20aplikasi%20KiraPuasaKu."
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 rounded-xl bg-stone-100 hover:bg-stone-200 dark:bg-stone-800 dark:hover:bg-stone-700/80 py-2.5 px-3 text-xs font-bold text-stone-800 dark:text-stone-200 border border-stone-200 dark:border-stone-700 transition cursor-pointer"
+                      >
+                        <Mail className="h-4 w-4 text-red-500 dark:text-red-400 shrink-0" />
+                        <span>{t.adminEmailBtn || (language === 'ms' ? 'Emel' : 'Email')}</span>
+                      </a>
+                      <a
+                        id="btn-telegram-admin-access"
+                        href="https://t.me/iqmalinsyad"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center justify-center gap-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white py-2.5 px-3 text-xs font-bold shadow-xs transition cursor-pointer"
+                      >
+                        <Send className="h-4 w-4 shrink-0" />
+                        <span>{t.adminTelegramBtn || 'Telegram'}</span>
+                      </a>
+                    </div>
+                  </div>
+                </form>
+              ) : (
+                /* STEP 2: Isi Maklumat Pengguna (Username, Email, Password) */
+                <form onSubmit={handleRegisterWithAccessCode} className="space-y-4">
+                  <div className="rounded-2xl border border-emerald-300 bg-emerald-50/90 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-200 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                      <div>
+                        <p className="font-bold text-xs">{t.codeVerifiedBadge || (language === 'ms' ? 'Kod Disahkan:' : 'Code Verified:')} <span className="font-mono">{accessCodeInput}</span></p>
+                        <p className="text-[10px] text-emerald-800 dark:text-emerald-300">{t.fillAccountDetailsHint || (language === 'ms' ? 'Sila isi maklumat akaun anda di bawah:' : 'Please fill in your account details below:')}</p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsAccessCodeVerified(false)}
+                      className="text-[11px] font-semibold underline text-emerald-800 hover:text-emerald-950 dark:text-emerald-300 cursor-pointer"
+                    >
+                      {t.btnChangeAccessCode || (language === 'ms' ? 'Tukar' : 'Change')}
+                    </button>
+                  </div>
+
+                  {/* 1. Username */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                      1. {t.labelUsername} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                        <span className="text-xs font-bold font-mono">@</span>
+                      </div>
+                      <input
+                        id="acc-username-input"
+                        type="text"
+                        required
+                        value={accUsername}
+                        onChange={(e) => setAccUsername(e.target.value.toLowerCase().replace(/[^a-z0-9._]/g, ''))}
+                        placeholder={language === 'ms' ? 'contoh: ahmad_ali' : 'e.g. ahmad_ali'}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 2. Email Address */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                      2. {t.labelEmail} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                        <Mail className="h-4 w-4" />
+                      </div>
+                      <input
+                        id="acc-email-input"
+                        type="email"
+                        required
+                        value={accEmail}
+                        onChange={(e) => setAccEmail(e.target.value)}
+                        placeholder={t.placeholderEmail || (language === 'ms' ? 'contoh@gmail.com' : 'user@example.com')}
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-4 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* 3. Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-stone-700 dark:text-stone-300">
+                      3. {t.labelPassword} <span className="text-rose-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">
+                        <Lock className="h-4 w-4" />
+                      </div>
+                      <input
+                        id="acc-password-input"
+                        type={showAccPassword ? 'text' : 'password'}
+                        required
+                        value={accPassword}
+                        onChange={(e) => setAccPassword(e.target.value)}
+                        placeholder={t.placeholderPassword || (language === 'ms' ? 'Min. 6 aksara' : 'Min 6 characters')}
+                        className="block w-full rounded-2xl border border-stone-200 bg-stone-50/80 pl-10 pr-10 py-2.5 sm:py-3 text-xs sm:text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:border-amber-600 focus:bg-white focus:ring-4 focus:ring-amber-500/15 focus:outline-none dark:border-stone-700 dark:bg-stone-800 dark:text-white dark:placeholder:text-stone-500 dark:focus:bg-stone-800 transition"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAccPassword(!showAccPassword)}
+                        className="absolute inset-y-0 right-0 flex items-center pr-3.5 text-stone-400 hover:text-stone-600 dark:hover:text-stone-200 cursor-pointer"
+                      >
+                        {showAccPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    id="acc-register-submit-btn"
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 py-3.5 px-4 text-xs sm:text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition active:scale-[0.98] disabled:opacity-50 cursor-pointer mt-2"
+                  >
+                    {isLoading ? (
+                      <span className="flex items-center gap-2">
+                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <span>{t.btnRegisteringWithAccessCode || (language === 'ms' ? 'Mendaftar Akaun...' : 'Registering Account...')}</span>
+                      </span>
+                    ) : (
+                      <>
+                        <span>{t.btnRegisterWithAccessCode || (language === 'ms' ? 'Daftar & Aktifkan Akaun' : 'Register & Activate Account')}</span>
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
+
+              {/* Return to Login */}
+              <div className="text-center pt-2">
+                <button
+                  type="button"
+                  onClick={() => handleTabSwitch('login')}
+                  className="text-xs font-semibold text-stone-600 hover:text-stone-900 dark:text-stone-400 dark:hover:text-white cursor-pointer"
+                >
+                  ← {t.backToLogin || (language === 'ms' ? 'Kembali ke Log Masuk' : 'Back to Sign In')}
+                </button>
+              </div>
+
+            </div>
           )}
 
         </div>

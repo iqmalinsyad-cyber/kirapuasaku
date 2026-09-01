@@ -66,11 +66,24 @@ export interface SystemSettings {
   telegram?: TelegramConfig;
 }
 
+export interface AccessCodeRecord {
+  id: string;
+  code: string;
+  is_used: boolean;
+  notes?: string;
+  created_at: string;
+  created_by?: string;
+  used_at?: string | null;
+  used_by_username?: string | null;
+  used_by_email?: string | null;
+}
+
 interface DatabaseSchema {
   users: UserRecord[];
   sessions: SessionRecord[];
   userData: Record<string, UserDataStore>; // keyed by userId
   systemSettings?: SystemSettings;
+  accessCodes?: AccessCodeRecord[];
 }
 
 // In-memory + File Storage
@@ -210,7 +223,20 @@ function createInitialDatabase(): DatabaseSchema {
           }
         }
       }
-    }
+    },
+    accessCodes: [
+      {
+        id: 'acc_initial_demo',
+        code: 'ACC-8K92X1',
+        is_used: false,
+        notes: 'Kod Akses Khas Permulaan',
+        created_at: new Date().toISOString(),
+        created_by: 'admin',
+        used_at: null,
+        used_by_username: null,
+        used_by_email: null,
+      }
+    ]
   };
 }
 
@@ -243,6 +269,21 @@ function loadDatabase() {
               enabled: true,
             }
           };
+        }
+        if (!loaded.accessCodes || !Array.isArray(loaded.accessCodes)) {
+          loaded.accessCodes = [
+            {
+              id: 'acc_initial_demo',
+              code: 'ACC-8K92X1',
+              is_used: false,
+              notes: 'Kod Akses Khas Permulaan',
+              created_at: new Date().toISOString(),
+              created_by: 'admin',
+              used_at: null,
+              used_by_username: null,
+              used_by_email: null,
+            }
+          ];
         }
         db = loaded;
         return;
@@ -629,6 +670,165 @@ async function startServer() {
         registration_code_used: user.registration_code_used,
         created_at: user.created_at,
         last_login: user.last_login
+      }
+    });
+  });
+
+  // 1.2 Verify Access Code for "Akses dengan Kod" Flow
+  app.post('/api/auth/verify-access-code', (req: Request, res: Response) => {
+    const { code } = req.body;
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      return res.status(400).json({ error: 'Sila masukkan kod akses.' });
+    }
+
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+    const foundCode = (db.accessCodes || []).find((c) => c.code.toUpperCase() === cleanCode);
+
+    if (!foundCode) {
+      return res.status(404).json({ error: 'Kod akses tidak sah atau tidak dijumpai dalam sistem. Sila semak semula atau hubungi Admin.' });
+    }
+
+    if (foundCode.is_used) {
+      return res.status(400).json({ error: 'Kod akses ini telah digunakan. Sila dapatkan kod baharu daripada Admin.' });
+    }
+
+    return res.json({
+      success: true,
+      valid: true,
+      code: foundCode.code,
+      message: 'Kod akses sah! Sila lengkapkan maklumat pendaftaran anda.',
+    });
+  });
+
+  // 1.3 Register with Validated Access Code ("Akses dengan Kod" Flow)
+  app.post('/api/auth/register-with-code', (req: Request, res: Response) => {
+    const { code, name, username, email, password, avatar } = req.body;
+
+    if (!code || typeof code !== 'string' || !code.trim()) {
+      return res.status(400).json({ error: 'Kod akses wajib disertakan.' });
+    }
+
+    const cleanCode = code.trim().toUpperCase().replace(/\s+/g, '');
+    const foundCode = (db.accessCodes || []).find((c) => c.code.toUpperCase() === cleanCode);
+
+    if (!foundCode) {
+      return res.status(404).json({ error: 'Kod akses tidak sah.' });
+    }
+
+    if (foundCode.is_used) {
+      return res.status(400).json({ error: 'Kod akses ini telah pun digunakan.' });
+    }
+
+    if (!username || typeof username !== 'string' || !username.trim()) {
+      return res.status(400).json({ error: 'Nama pengguna (username) wajib diisi.' });
+    }
+
+    const cleanUsername = username.trim().toLowerCase();
+    if (cleanUsername.length < 3) {
+      return res.status(400).json({ error: 'Nama pengguna mestilah sekurang-kurangnya 3 aksara.' });
+    }
+
+    if (!email || typeof email !== 'string' || !email.trim()) {
+      return res.status(400).json({ error: 'Alamat emel wajib diisi.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: 'Format alamat emel tidak sah.' });
+    }
+
+    if (!password || typeof password !== 'string' || password.length < 6) {
+      return res.status(400).json({ error: 'Kata laluan mestilah sekurang-kurangnya 6 aksara.' });
+    }
+
+    // Check uniqueness
+    const existingUser = db.users.find((u) => u.username.toLowerCase() === cleanUsername);
+    if (existingUser) {
+      return res.status(409).json({ error: 'Nama pengguna ini telah didaftarkan. Sila pilih nama pengguna lain.' });
+    }
+
+    const existingMail = db.users.find((u) => u.email && u.email.toLowerCase() === cleanEmail);
+    if (existingMail) {
+      return res.status(409).json({ error: 'Alamat emel ini telah didaftarkan. Sila guna alamat emel lain.' });
+    }
+
+    // Mark code as used
+    foundCode.is_used = true;
+    foundCode.used_at = new Date().toISOString();
+    foundCode.used_by_username = cleanUsername;
+    foundCode.used_by_email = cleanEmail;
+
+    const salt = generateSalt();
+    const passwordHash = hashPassword(password, salt);
+    const userId = 'usr_' + Date.now() + '_' + crypto.randomBytes(4).toString('hex');
+    const displayName = (name && typeof name === 'string' && name.trim()) ? name.trim() : cleanUsername;
+    const defaultAvatar = avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(cleanUsername)}`;
+
+    const newUser: UserRecord = {
+      id: userId,
+      username: cleanUsername,
+      name: displayName,
+      email: cleanEmail,
+      email_verified: true,
+      verification_token: null,
+      registration_code: cleanCode,
+      registration_code_used: true,
+      code_type: 'access',
+      salt,
+      passwordHash,
+      role: 'user',
+      status: 'approved', // Immediately active via verified access code!
+      avatar: defaultAvatar,
+      created_at: new Date().toISOString(),
+      last_login: new Date().toISOString(),
+    };
+
+    db.users.push(newUser);
+
+    // Initialize user data store
+    db.userData[userId] = {
+      qada: null,
+      records: [],
+      settings: {
+        theme: 'light',
+        language: 'ms',
+        userName: displayName,
+        reminder: {
+          id: 'rem_' + userId,
+          user_id: userId,
+          enabled: false,
+          days: [1, 4],
+          time: '20:00',
+          message: 'Peringatan puasa ganti',
+          created_at: new Date().toISOString(),
+        }
+      }
+    };
+
+    saveDatabase();
+
+    // Trigger Telegram notification to Admin
+    if (isTelegramConfigured(db.systemSettings?.telegram)) {
+      sendUserActivatedAlert(newUser, db.systemSettings?.telegram)
+        .catch((e) => console.error('[Telegram Bot] Alert error:', e));
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: 'Alhamdulillah, akaun anda telah berjaya didaftarkan dan diaktifkan dengan Kod Akses! Sila log masuk ke akaun anda.',
+      username: cleanUsername,
+      email: cleanEmail,
+      user: {
+        id: newUser.id,
+        username: newUser.username,
+        name: newUser.name,
+        email: newUser.email,
+        email_verified: newUser.email_verified,
+        role: newUser.role,
+        status: newUser.status,
+        avatar: newUser.avatar,
+        created_at: newUser.created_at
       }
     });
   });
@@ -1182,6 +1382,154 @@ async function startServer() {
     return res.json({
       success: true,
       message: `Pengguna "${targetUser.name}" berjaya dipadam.`
+    });
+  });
+
+  // 9.0 Update User Fasting Target by Admin (Admin only)
+  app.post('/api/admin/users/:userId/target', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { userId } = req.params;
+    const { total_required } = req.body;
+
+    const targetUser = db.users.find((u) => u.id === userId);
+    if (!targetUser) {
+      return res.status(404).json({ error: 'Pengguna tidak dijumpai.' });
+    }
+
+    const cleanTotal = Math.max(1, Number(total_required) || 1);
+    if (!db.userData[userId]) {
+      db.userData[userId] = { qada: null, records: [], settings: null };
+    }
+
+    if (db.userData[userId].qada) {
+      db.userData[userId].qada.total_required = cleanTotal;
+      const completed = db.userData[userId].qada.total_completed || 0;
+      db.userData[userId].qada.remaining = Math.max(0, cleanTotal - completed);
+      db.userData[userId].qada.updated_at = new Date().toISOString();
+    } else {
+      db.userData[userId].qada = {
+        id: `qada_${userId}`,
+        user_id: userId,
+        total_required: cleanTotal,
+        total_completed: 0,
+        remaining: cleanTotal,
+        year: '1447H / 2026',
+        notes: '',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+    }
+
+    saveDatabase();
+
+    return res.json({
+      success: true,
+      message: `Sasaran puasa ganti bagi "${targetUser.name}" berjaya dikemaskini kepada ${cleanTotal} hari.`,
+      qada: db.userData[userId].qada,
+    });
+  });
+
+  // ==========================================
+  // ACCESS CODES ADMIN MANAGEMENT (verifyToken + verifyAdmin)
+  // ==========================================
+
+  // 9.0.1 Get All Access Codes (Admin only)
+  app.get('/api/admin/access-codes', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const list = db.accessCodes || [];
+    return res.json({ accessCodes: list });
+  });
+
+  // 9.0.2 Create New Access Code (Admin only)
+  app.post('/api/admin/access-codes', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { code, notes } = req.body;
+    if (!db.accessCodes) {
+      db.accessCodes = [];
+    }
+
+    let finalCode = '';
+    if (code && typeof code === 'string' && code.trim()) {
+      finalCode = code.trim().toUpperCase().replace(/\s+/g, '');
+    } else {
+      finalCode = generateAccessCode();
+    }
+
+    // Check if code exists
+    const exists = db.accessCodes.some((c) => c.code.toUpperCase() === finalCode);
+    if (exists) {
+      return res.status(409).json({ error: 'Kod akses ini telah wujud. Sila jana kod berbeza.' });
+    }
+
+    const newAccessCode: AccessCodeRecord = {
+      id: 'acc_' + Date.now() + '_' + crypto.randomBytes(3).toString('hex'),
+      code: finalCode,
+      is_used: false,
+      notes: notes && typeof notes === 'string' ? notes.trim() : '',
+      created_at: new Date().toISOString(),
+      created_by: req.user!.username || 'admin',
+      used_at: null,
+      used_by_username: null,
+      used_by_email: null,
+    };
+
+    db.accessCodes.unshift(newAccessCode);
+    saveDatabase();
+
+    return res.status(201).json({
+      success: true,
+      message: `Kod akses "${finalCode}" berjaya dijana dan disimpan!`,
+      accessCode: newAccessCode,
+    });
+  });
+
+  // 9.0.3 Update Access Code (Admin only)
+  app.put('/api/admin/access-codes/:id', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    const { code, notes } = req.body;
+
+    if (!db.accessCodes) db.accessCodes = [];
+    const target = db.accessCodes.find((c) => c.id === id || c.code.toUpperCase() === id.toUpperCase());
+
+    if (!target) {
+      return res.status(404).json({ error: 'Kod akses tidak dijumpai.' });
+    }
+
+    if (code && typeof code === 'string' && code.trim()) {
+      const cleanNewCode = code.trim().toUpperCase().replace(/\s+/g, '');
+      const duplicate = db.accessCodes.find((c) => c.id !== target.id && c.code.toUpperCase() === cleanNewCode);
+      if (duplicate) {
+        return res.status(409).json({ error: 'Kod akses ini telah digunakan oleh rekod lain.' });
+      }
+      target.code = cleanNewCode;
+    }
+
+    if (notes !== undefined && typeof notes === 'string') {
+      target.notes = notes.trim();
+    }
+
+    saveDatabase();
+
+    return res.json({
+      success: true,
+      message: 'Kod akses berjaya dikemaskini.',
+      accessCode: target,
+    });
+  });
+
+  // 9.0.4 Delete Access Code (Admin only)
+  app.delete('/api/admin/access-codes/:id', verifyToken, verifyAdmin, (req: AuthenticatedRequest, res: Response) => {
+    const { id } = req.params;
+    if (!db.accessCodes) db.accessCodes = [];
+
+    const target = db.accessCodes.find((c) => c.id === id || c.code.toUpperCase() === id.toUpperCase());
+    if (!target) {
+      return res.status(404).json({ error: 'Kod akses tidak dijumpai.' });
+    }
+
+    db.accessCodes = db.accessCodes.filter((c) => c.id !== target.id);
+    saveDatabase();
+
+    return res.json({
+      success: true,
+      message: `Kod akses "${target.code}" berjaya dipadam.`,
     });
   });
 
